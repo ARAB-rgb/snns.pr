@@ -12,7 +12,7 @@ export interface User {
   lastSeen?: string;
 }
 
-export type MessageType = 'text' | 'audio' | 'image' | 'call_log';
+export type MessageType = 'text' | 'audio' | 'image' | 'file' | 'call_log';
 
 export interface Message {
   id: string;
@@ -22,6 +22,8 @@ export interface Message {
   timestamp: string; // ISO or formatted
   type: MessageType;
   mediaUrl?: string;
+  fileName?: string;
+  replyTo?: { id: string; text: string; senderName?: string };
   audioDuration?: number; // seconds
   isRead: boolean;
   isDelivered: boolean;

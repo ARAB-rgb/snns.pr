@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
-import { Search, Plus, Video, Phone, CheckCheck } from 'lucide-react';
+import { Search, Plus, Video, Phone, CheckCheck, MessageSquare } from 'lucide-react';
 import { User, Message } from '../types';
 import { useLanguage } from '../i18n/LanguageContext';
 import { SUPPORTED_LANGUAGES } from '../types/i18n';
 
 interface ChatListProps {
   users: User[];
+  conversations: Array<{ id: string; otherUserId: string; lastMessage: string; lastMessageTime: string }>;
   messages: Record<string, Message[]>;
   onSelectUser: (user: User) => void;
   onStartCall: (user: User, type: 'audio' | 'video') => void;
@@ -14,6 +15,7 @@ interface ChatListProps {
 
 export const ChatList: React.FC<ChatListProps> = ({
   users,
+  conversations,
   messages,
   onSelectUser,
   onStartCall,
@@ -22,11 +24,34 @@ export const ChatList: React.FC<ChatListProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const { t } = useLanguage();
 
-  const filteredUsers = users.filter((u) => {
+  // Map active conversations to user objects
+  const activeChatItems = conversations.map((conv) => {
+    const userObj = users.find((u) => u.id === conv.otherUserId) || {
+      id: conv.otherUserId,
+      name: 'مستخدم',
+      avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
+      language: 'ar' as const,
+      isOnline: false,
+      lastSeen: conv.lastMessageTime
+    };
+    const userMsgs = messages[userObj.id] || [];
+    const lastMsg = userMsgs[userMsgs.length - 1];
+
+    return {
+      user: userObj,
+      lastMessageText: lastMsg ? (lastMsg.type === 'image' ? '📷 صورة' : lastMsg.type === 'audio' ? '🎤 تسجيل صوتي' : lastMsg.type === 'file' ? '📁 ملف' : lastMsg.text) : conv.lastMessage,
+      timestamp: lastMsg ? lastMsg.timestamp : conv.lastMessageTime,
+      lastMsg
+    };
+  });
+
+  const filteredItems = activeChatItems.filter((item) => {
     const q = searchQuery.toLowerCase();
-    const userMsgs = messages[u.id] || [];
-    const hasMsgMatch = userMsgs.some((m) => m.text.toLowerCase().includes(q));
-    return u.name.toLowerCase().includes(q) || u.language.includes(q) || hasMsgMatch;
+    return (
+      item.user.name.toLowerCase().includes(q) ||
+      (item.user.email && item.user.email.toLowerCase().includes(q)) ||
+      item.lastMessageText.toLowerCase().includes(q)
+    );
   });
 
   return (
@@ -47,16 +72,20 @@ export const ChatList: React.FC<ChatListProps> = ({
 
       {/* Chat Items List */}
       <div className="flex-1 overflow-y-auto divide-y divide-slate-800/50 p-2 space-y-1">
-        {filteredUsers.length === 0 ? (
+        {conversations.length === 0 ? (
           <div className="h-64 flex flex-col items-center justify-center text-slate-500 p-6 text-center">
-            <Search className="w-10 h-10 mb-2 text-slate-600" />
-            <p className="text-xs">{t('noMessagesYet')}</p>
+            <MessageSquare className="w-12 h-12 mb-3 text-slate-600 stroke-[1.5]" />
+            <p className="text-xs font-medium text-slate-400">لا توجد محادثات بعد</p>
+            <p className="text-[11px] text-slate-500 mt-1">انقر على زر (+) لبدء محادثة جديدة مع مستخدم حقيقي</p>
+          </div>
+        ) : filteredItems.length === 0 ? (
+          <div className="h-48 flex flex-col items-center justify-center text-slate-500 p-6 text-center">
+            <Search className="w-8 h-8 mb-2 text-slate-600" />
+            <p className="text-xs">لا توجد نتائج مطابقة للبحث</p>
           </div>
         ) : (
-          filteredUsers.map((user) => {
-            const userMsgs = messages[user.id] || [];
-            const lastMsg = userMsgs[userMsgs.length - 1];
-            const langInfo = SUPPORTED_LANGUAGES[user.language];
+          filteredItems.map(({ user, lastMessageText, timestamp, lastMsg }) => {
+            const langInfo = SUPPORTED_LANGUAGES[user.language] || SUPPORTED_LANGUAGES['ar'];
 
             return (
               <div
@@ -83,18 +112,20 @@ export const ChatList: React.FC<ChatListProps> = ({
                     <div className="flex items-center justify-between gap-1 mb-0.5">
                       <h3 className="font-semibold text-xs text-slate-100 truncate flex items-center gap-1.5">
                         <span>{user.name}</span>
-                        <span className="text-[10px] opacity-80" title={langInfo.name}>
-                          {langInfo.flag}
-                        </span>
+                        {langInfo && (
+                          <span className="text-[10px] opacity-80" title={langInfo.name}>
+                            {langInfo.flag}
+                          </span>
+                        )}
                       </h3>
                       <span className="text-[10px] text-slate-400 shrink-0">
-                        {lastMsg ? lastMsg.timestamp : user.lastSeen}
+                        {timestamp}
                       </span>
                     </div>
 
                     <div className="flex items-center justify-between gap-2">
                       <p className="text-xs text-slate-400 truncate flex-1">
-                        {lastMsg ? lastMsg.text : user.statusText}
+                        {lastMessageText || 'محادثة جديدة'}
                       </p>
                       {lastMsg && lastMsg.isRead && (
                         <CheckCheck className="w-3.5 h-3.5 text-cyan-400 shrink-0" />

@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
-import { Shield, LogOut, AlertTriangle, Copy, Check } from 'lucide-react';
+import { Shield, LogOut, AlertTriangle } from 'lucide-react';
 import { User } from '../types';
 import { useLanguage } from '../i18n/LanguageContext';
-import { firebaseAuth } from '../services/firebaseAuth';
+import { supabaseAuth } from '../services/supabaseAuth';
 import { SUPPORTED_LANGUAGES } from '../types/i18n';
 
 interface AuthModalProps {
@@ -12,43 +12,24 @@ interface AuthModalProps {
 
 export const AuthModal: React.FC<AuthModalProps> = ({ currentUser, onClose }) => {
   const { t } = useLanguage();
-  const [authError, setAuthError] = useState<{ type: string; domain?: string; message?: string } | null>(null);
-  const [copied, setCopied] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   const handleGoogleSignIn = async () => {
     setLoading(true);
     setAuthError(null);
-    const result = await firebaseAuth.signInWithGoogle();
+    const result = await supabaseAuth.signInWithGoogle();
     setLoading(false);
 
     if (result.user) {
       if (onClose) onClose();
     } else if (result.error) {
-      if (result.error === 'unauthorized-domain') {
-        setAuthError({
-          type: 'unauthorized-domain',
-          domain: result.domain || window.location.hostname
-        });
-      } else {
-        setAuthError({
-          type: 'general',
-          message: result.error
-        });
-      }
-    }
-  };
-
-  const handleCopyDomain = () => {
-    if (authError?.domain) {
-      navigator.clipboard.writeText(authError.domain);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      setAuthError(result.error);
     }
   };
 
   const handleLogout = async () => {
-    await firebaseAuth.logout();
+    await supabaseAuth.logout();
     if (onClose) onClose();
   };
 
@@ -96,34 +77,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({ currentUser, onClose }) =>
               قم بتسجيل الدخول بحسابك الحقيقي لفتح جميع الميزات، إرسال الرسائل، وبدء المكالمات الصوتية والمرئية.
             </p>
 
-            {authError?.type === 'unauthorized-domain' && (
-              <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-2xl text-amber-200 text-xs text-right space-y-2">
-                <div className="flex items-start gap-2 font-bold text-amber-400">
-                  <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
-                  <span>مطلوب تصريح النطاق في Firebase</span>
-                </div>
-                <p className="text-[11px] text-slate-300 leading-relaxed">
-                  يجب إضافة نطاق التطبيق التالي في لوحة تحكم Firebase تحت:
-                  <br />
-                  <strong className="text-amber-300">Authentication &gt; Settings &gt; Authorized domains</strong>
-                </p>
-                <div className="flex items-center justify-between bg-slate-950 p-2 rounded-xl border border-slate-800 text-[11px]">
-                  <span className="font-mono text-cyan-300 truncate dir-ltr">{authError.domain}</span>
-                  <button
-                    onClick={handleCopyDomain}
-                    className="p-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center gap-1 shrink-0 transition"
-                  >
-                    {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                    <span className="text-[10px]">{copied ? 'تم النسخ' : 'نسخ'}</span>
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {authError?.type === 'general' && (
+            {authError && (
               <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-2xl text-red-300 text-xs text-right flex items-center gap-2">
                 <AlertTriangle className="w-4 h-4 shrink-0" />
-                <span>{authError.message}</span>
+                <span>{authError}</span>
               </div>
             )}
 

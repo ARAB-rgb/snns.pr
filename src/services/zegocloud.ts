@@ -2,9 +2,9 @@ import { ZegoConfig } from '../types';
 
 class ZegoCloudService {
   private config: ZegoConfig = {
-    appId: '1234567890',
-    serverSecret: 'a1b2c3d4e5f678901234567890abcdef',
-    userName: 'FlutterUser',
+    appId: import.meta.env.VITE_ZEGO_APP_ID || '1234567890',
+    serverSecret: import.meta.env.VITE_ZEGO_APP_SIGN || '',
+    userName: 'snns_user',
     isConfigured: true,
     useLiveSdkSimulation: true
   };

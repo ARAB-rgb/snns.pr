@@ -1,5 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { ArrowLeft, Phone, Video, Send, Mic, Image, Languages, Play, Pause, CheckCheck, Loader2, Sparkles } from 'lucide-react';
+import {
+  ArrowLeft, Phone, Video, Send, Mic, Image, Paperclip,
+  Smile, Trash2, Reply, X, Play, Pause, CheckCheck,
+  Sparkles, FileText, Download
+} from 'lucide-react';
 import { User, Message } from '../types';
 import { useLanguage } from '../i18n/LanguageContext';
 import { SUPPORTED_LANGUAGES } from '../types/i18n';
@@ -10,9 +14,18 @@ interface ChatDetailProps {
   participant: User;
   messages: Message[];
   onBack: () => void;
-  onSendMessage: (text: string, type?: 'text' | 'audio' | 'image', mediaUrl?: string) => void;
+  onSendMessage: (
+    text: string,
+    type?: 'text' | 'audio' | 'image' | 'file',
+    mediaUrl?: string,
+    fileName?: string,
+    replyTo?: { id: string; text: string; senderName?: string }
+  ) => void;
+  onDeleteMessage?: (messageId: string) => void;
   onStartCall: (participant: User, type: 'audio' | 'video') => void;
 }
+
+const EMOJI_LIST = ['😀', '😂', '😍', '👍', '❤️', '🔥', '🎉', '🙏', '😊', '🤝', '🙌', '✨'];
 
 export const ChatDetail: React.FC<ChatDetailProps> = ({
   currentUserId,
@@ -20,6 +33,7 @@ export const ChatDetail: React.FC<ChatDetailProps> = ({
   messages,
   onBack,
   onSendMessage,
+  onDeleteMessage,
   onStartCall
 }) => {
   const { currentLang, direction, t } = useLanguage();
@@ -28,6 +42,8 @@ export const ChatDetail: React.FC<ChatDetailProps> = ({
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const [translatedMessages, setTranslatedMessages] = useState<Record<string, boolean>>({});
   const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [replyingTo, setReplyingTo] = useState<{ id: string; text: string; senderName?: string } | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -55,7 +71,8 @@ export const ChatDetail: React.FC<ChatDetailProps> = ({
       recorder.onstop = () => {
         const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
         const audioUrl = URL.createObjectURL(audioBlob);
-        onSendMessage('Voice Note', 'audio', audioUrl);
+        onSendMessage('تسجيل صوتي', 'audio', audioUrl, undefined, replyingTo || undefined);
+        setReplyingTo(null);
         sounds.playMessageSentSound();
         stream.getTracks().forEach((track) => track.stop());
       };
@@ -69,8 +86,8 @@ export const ChatDetail: React.FC<ChatDetailProps> = ({
       }, 1000);
     } catch (err) {
       console.warn('Mic access error for voice note:', err);
-      // Fallback voice note if mic denied
-      onSendMessage('Voice Note (0:04)', 'audio', '#');
+      onSendMessage('تسجيل صوتي', 'audio', '#', undefined, replyingTo || undefined);
+      setReplyingTo(null);
       sounds.playMessageSentSound();
     }
   };
@@ -88,8 +105,10 @@ export const ChatDetail: React.FC<ChatDetailProps> = ({
 
   const handleSend = () => {
     if (!inputText.trim()) return;
-    onSendMessage(inputText.trim(), 'text');
+    onSendMessage(inputText.trim(), 'text', undefined, undefined, replyingTo || undefined);
     setInputText('');
+    setReplyingTo(null);
+    setShowEmojiPicker(false);
     sounds.playMessageSentSound();
   };
 
@@ -106,7 +125,8 @@ export const ChatDetail: React.FC<ChatDetailProps> = ({
       const reader = new FileReader();
       reader.onload = (event) => {
         if (event.target?.result) {
-          onSendMessage('Photo', 'image', event.target.result as string);
+          onSendMessage('صورة', 'image', event.target.result as string, file.name, replyingTo || undefined);
+          setReplyingTo(null);
           sounds.playMessageSentSound();
         }
       };
@@ -114,7 +134,26 @@ export const ChatDetail: React.FC<ChatDetailProps> = ({
     }
   };
 
-  const langInfo = SUPPORTED_LANGUAGES[participant.language];
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        if (event.target?.result) {
+          onSendMessage(`ملف: ${file.name}`, 'file', event.target.result as string, file.name, replyingTo || undefined);
+          setReplyingTo(null);
+          sounds.playMessageSentSound();
+        }
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const addEmoji = (emoji: string) => {
+    setInputText((prev) => prev + emoji);
+  };
+
+  const langInfo = SUPPORTED_LANGUAGES[participant.language] || SUPPORTED_LANGUAGES['ar'];
 
   return (
     <div className="flex-1 flex flex-col bg-slate-950 h-full overflow-hidden relative">
@@ -124,7 +163,7 @@ export const ChatDetail: React.FC<ChatDetailProps> = ({
           <button
             onClick={onBack}
             className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 transition-all cursor-pointer"
-            title="Back"
+            title="رجوع"
           >
             <ArrowLeft className={`w-4 h-4 ${direction === 'rtl' ? 'rotate-180' : ''}`} />
           </button>
@@ -143,7 +182,7 @@ export const ChatDetail: React.FC<ChatDetailProps> = ({
           <div className="min-w-0">
             <h2 className="text-xs font-bold text-slate-100 truncate flex items-center gap-1.5">
               <span>{participant.name}</span>
-              <span className="text-[10px] opacity-90">{langInfo.flag}</span>
+              {langInfo && <span className="text-[10px] opacity-90">{langInfo.flag}</span>}
             </h2>
             <p className="text-[10px] text-emerald-400 font-medium">
               {participant.isOnline ? t('online') : participant.lastSeen}
@@ -180,22 +219,50 @@ export const ChatDetail: React.FC<ChatDetailProps> = ({
           return (
             <div
               key={msg.id}
-              className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} transition-all`}
+              className={`group relative flex flex-col ${isMe ? 'items-end' : 'items-start'} transition-all`}
             >
               <div
-                className={`max-w-[82%] sm:max-w-[70%] p-3 rounded-2xl shadow-md text-xs relative ${
+                className={`max-w-[85%] sm:max-w-[70%] p-3 rounded-2xl shadow-md text-xs relative ${
                   isMe
                     ? 'bg-gradient-to-r from-cyan-600 to-teal-600 text-white rounded-br-none'
-                    : 'bg-slate-850 bg-slate-800 text-slate-100 rounded-bl-none border border-slate-700/80'
+                    : 'bg-slate-800 text-slate-100 rounded-bl-none border border-slate-700/80'
                 }`}
               >
+                {/* Reply Context Header if msg has replyTo */}
+                {msg.replyTo && (
+                  <div className="mb-2 p-2 rounded-xl bg-black/20 border-l-2 border-cyan-300 text-[11px] text-slate-200">
+                    <span className="font-bold text-cyan-300 block text-[10px]">
+                      {msg.replyTo.senderName || 'رد على:'}
+                    </span>
+                    <span className="truncate block opacity-90">{msg.replyTo.text}</span>
+                  </div>
+                )}
+
                 {/* Media Image */}
                 {msg.type === 'image' && msg.mediaUrl && (
                   <img
                     src={msg.mediaUrl}
                     alt="attachment"
-                    className="max-w-full max-h-48 rounded-xl object-cover mb-2 border border-black/20"
+                    className="max-w-full max-h-52 rounded-xl object-cover mb-2 border border-black/20"
                   />
+                )}
+
+                {/* File Attachment */}
+                {msg.type === 'file' && (
+                  <a
+                    href={msg.mediaUrl || '#'}
+                    download={msg.fileName || 'file'}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="flex items-center gap-2 p-2 rounded-xl bg-black/20 hover:bg-black/30 border border-white/10 text-white mb-1 transition-all"
+                  >
+                    <FileText className="w-5 h-5 text-cyan-300 shrink-0" />
+                    <div className="min-w-0 flex-1">
+                      <p className="font-semibold text-xs truncate">{msg.fileName || 'ملف مرفق'}</p>
+                      <span className="text-[10px] text-slate-300 opacity-80">تنزيل الملف</span>
+                    </div>
+                    <Download className="w-4 h-4 text-cyan-300 shrink-0" />
+                  </a>
                 )}
 
                 {/* Voice Note Audio */}
@@ -223,7 +290,7 @@ export const ChatDetail: React.FC<ChatDetailProps> = ({
                           />
                         ))}
                       </div>
-                      <span className="text-[9px] opacity-80 mt-0.5 block">Voice Message</span>
+                      <span className="text-[9px] opacity-80 mt-0.5 block">تسجيل صوتي</span>
                     </div>
                   </div>
                 )}
@@ -255,12 +322,62 @@ export const ChatDetail: React.FC<ChatDetailProps> = ({
                   <span>{msg.timestamp}</span>
                   {isMe && <CheckCheck className="w-3 h-3 text-cyan-200" />}
                 </div>
+
+                {/* Message Hover Actions (Reply & Delete) */}
+                <div
+                  className={`absolute top-1 ${
+                    isMe ? '-left-16' : '-right-16'
+                  } hidden group-hover:flex items-center gap-1 bg-slate-900/90 border border-slate-700 rounded-xl p-1 shadow-lg z-20`}
+                >
+                  <button
+                    onClick={() =>
+                      setReplyingTo({
+                        id: msg.id,
+                        text: msg.type === 'text' ? msg.text : msg.type === 'image' ? '📷 صورة' : '📁 ملف',
+                        senderName: isMe ? 'أنت' : participant.name
+                      })
+                    }
+                    className="p-1 rounded-lg hover:bg-slate-800 text-slate-300 hover:text-cyan-400 cursor-pointer"
+                    title="رد"
+                  >
+                    <Reply className="w-3.5 h-3.5" />
+                  </button>
+
+                  {onDeleteMessage && (
+                    <button
+                      onClick={() => onDeleteMessage(msg.id)}
+                      className="p-1 rounded-lg hover:bg-slate-800 text-slate-300 hover:text-red-400 cursor-pointer"
+                      title="حذف الرسالة"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           );
         })}
         <div ref={messagesEndRef} />
       </div>
+
+      {/* Reply Banner */}
+      {replyingTo && (
+        <div className="px-3 py-2 bg-slate-900/95 border-t border-slate-800 flex items-center justify-between text-xs">
+          <div className="flex items-center gap-2 min-w-0 border-l-2 border-cyan-400 pl-2">
+            <Reply className="w-4 h-4 text-cyan-400 shrink-0" />
+            <div className="min-w-0">
+              <span className="font-bold text-cyan-300 text-[11px] block">{replyingTo.senderName}</span>
+              <p className="text-slate-300 truncate text-[11px]">{replyingTo.text}</p>
+            </div>
+          </div>
+          <button
+            onClick={() => setReplyingTo(null)}
+            className="p-1 rounded-full hover:bg-slate-800 text-slate-400 hover:text-white cursor-pointer"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
 
       {/* Recording Bar Indicator */}
       {isRecording && (
@@ -278,12 +395,42 @@ export const ChatDetail: React.FC<ChatDetailProps> = ({
         </div>
       )}
 
+      {/* Emoji Bar Picker */}
+      {showEmojiPicker && (
+        <div className="p-2 bg-slate-900 border-t border-slate-800 flex items-center gap-1.5 overflow-x-auto">
+          {EMOJI_LIST.map((emoji) => (
+            <button
+              key={emoji}
+              onClick={() => addEmoji(emoji)}
+              className="p-1.5 text-base hover:bg-slate-800 rounded-xl transition-all cursor-pointer shrink-0"
+            >
+              {emoji}
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* Message Input Controls */}
-      <div className="p-2.5 bg-slate-900 border-t border-slate-800 flex items-center gap-2">
+      <div className="p-2.5 bg-slate-900 border-t border-slate-800 flex items-center gap-1.5">
+        {/* Emoji Button */}
+        <button
+          onClick={() => setShowEmojiPicker(!showEmojiPicker)}
+          className="p-2.5 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-300 cursor-pointer transition-all"
+          title="إيموجي"
+        >
+          <Smile className="w-4 h-4 text-amber-400" />
+        </button>
+
         {/* Photo Attachment */}
-        <label className="p-2.5 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-300 cursor-pointer transition-all">
+        <label className="p-2.5 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-300 cursor-pointer transition-all" title="إرسال صورة">
           <Image className="w-4 h-4 text-cyan-400" />
           <input type="file" accept="image/*" className="hidden" onChange={handleImageUpload} />
+        </label>
+
+        {/* File Attachment */}
+        <label className="p-2.5 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-300 cursor-pointer transition-all" title="إرسال ملف">
+          <Paperclip className="w-4 h-4 text-teal-400" />
+          <input type="file" className="hidden" onChange={handleFileUpload} />
         </label>
 
         {/* Text Input */}
@@ -314,7 +461,7 @@ export const ChatDetail: React.FC<ChatDetailProps> = ({
           onClick={handleSend}
           disabled={!inputText.trim()}
           className="p-2.5 rounded-2xl bg-gradient-to-tr from-cyan-600 to-teal-500 disabled:opacity-40 text-slate-950 font-bold hover:brightness-110 active:scale-95 transition-all cursor-pointer"
-          title="Send"
+          title="إرسال"
         >
           <Send className={`w-4 h-4 ${direction === 'rtl' ? 'rotate-180' : ''}`} />
         </button>

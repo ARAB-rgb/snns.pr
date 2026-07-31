@@ -11,53 +11,68 @@ import { IncomingCallOverlay } from './components/IncomingCallOverlay';
 import { ContactsList } from './components/ContactsList';
 import { SettingsScreen } from './components/SettingsScreen';
 import { AuthModal } from './components/AuthModal';
+import { NewChatModal } from './components/NewChatModal';
 
 import { User, Message, CallLog, ActiveCallState } from './types';
-import { firebaseAuth } from './services/firebaseAuth';
-import { firestoreService } from './services/firestoreService';
+import { supabaseAuth } from './services/supabaseAuth';
+import { supabaseService } from './services/supabaseService';
 import { zegoService } from './services/zegocloud';
 import { sounds } from './services/audioSynthesizer';
 
 function AppContent() {
-  const [currentUser, setCurrentUser] = useState<User | null>(firebaseAuth.getActiveUser());
+  const [currentUser, setCurrentUser] = useState<User | null>(supabaseAuth.getActiveUser());
   const [activeTab, setActiveTab] = useState<TabType>('chats');
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
 
   const [users, setUsers] = useState<User[]>([]);
+  const [conversations, setConversations] = useState<Array<{ id: string; otherUserId: string; lastMessage: string; lastMessageTime: string }>>([]);
   const [messages, setMessages] = useState<Record<string, Message[]>>({});
   const [callLogs, setCallLogs] = useState<CallLog[]>([]);
 
   const [activeCall, setActiveCall] = useState<ActiveCallState | null>(null);
   const [incomingCall, setIncomingCall] = useState<{ callId: string; caller: User; type: 'audio' | 'video' } | null>(null);
   const [showAuthModal, setShowAuthModal] = useState(false);
+  const [showNewChatModal, setShowNewChatModal] = useState(false);
 
-  // Subscribe to Firebase Auth User Changes
+  // Subscribe to Supabase Auth User Changes
   useEffect(() => {
-    const unsubscribe = firebaseAuth.onUserChange((user) => {
+    const unsubscribe = supabaseAuth.onUserChange((user) => {
       setCurrentUser(user);
     });
     return () => unsubscribe();
   }, []);
 
-  // Subscribe to Real Firestore Users
+  // Subscribe to Real Supabase Profiles
   useEffect(() => {
     if (!currentUser) {
       setUsers([]);
       return;
     }
-    const unsub = firestoreService.subscribeUsers(currentUser.id, (userList) => {
+    const unsub = supabaseService.subscribeUsers(currentUser.id, (userList) => {
       setUsers(userList);
     });
     return () => unsub();
   }, [currentUser]);
 
-  // Subscribe to Real Firestore Call Logs
+  // Subscribe to Real Conversations for current user
+  useEffect(() => {
+    if (!currentUser) {
+      setConversations([]);
+      return;
+    }
+    const unsub = supabaseService.subscribeConversations(currentUser.id, (convs) => {
+      setConversations(convs);
+    });
+    return () => unsub();
+  }, [currentUser]);
+
+  // Subscribe to Real Supabase Call Logs
   useEffect(() => {
     if (!currentUser) {
       setCallLogs([]);
       return;
     }
-    const unsub = firestoreService.subscribeCallLogs(currentUser.id, (logs) => {
+    const unsub = supabaseService.subscribeCallLogs(currentUser.id, (logs) => {
       setCallLogs(logs);
     });
     return () => unsub();
@@ -66,13 +81,13 @@ function AppContent() {
   // Subscribe to Real Incoming Calls
   useEffect(() => {
     if (!currentUser) return;
-    const unsub = firestoreService.subscribeIncomingCalls(currentUser.id, (inc) => {
+    const unsub = supabaseService.subscribeIncomingCalls(currentUser.id, (inc) => {
       if (inc) {
         const callerObj = users.find((u) => u.id === inc.callerId) || {
           id: inc.callerId,
           name: 'متصل جديد',
           avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
-          language: 'ar',
+          language: 'ar' as const,
           isOnline: true
         };
         setIncomingCall({ callId: inc.callId, caller: callerObj, type: inc.type });
@@ -86,8 +101,8 @@ function AppContent() {
   // Subscribe to Messages when a chat is open
   useEffect(() => {
     if (!currentUser || !selectedUser) return;
-    const convId = firestoreService.getConversationId(currentUser.id, selectedUser.id);
-    const unsub = firestoreService.subscribeMessages(convId, (msgList) => {
+    const convId = supabaseService.getConversationId(currentUser.id, selectedUser.id);
+    const unsub = supabaseService.subscribeMessages(convId, (msgList) => {
       setMessages((prev) => ({
         ...prev,
         [selectedUser.id]: msgList
@@ -100,7 +115,7 @@ function AppContent() {
   const startCall = async (participant: User, type: 'audio' | 'video') => {
     if (!currentUser) return;
 
-    const callId = await firestoreService.createCall(currentUser.id, participant.id, type);
+    const callId = await supabaseService.createCall(currentUser.id, participant.id, type);
     const roomId = zegoService.generateRoomId(participant.id);
 
     setActiveCall({
@@ -125,7 +140,7 @@ function AppContent() {
   const acceptIncomingCall = async () => {
     if (!incomingCall || !currentUser) return;
 
-    await firestoreService.updateCallStatus(incomingCall.callId, 'accepted');
+    await supabaseService.updateCallStatus(incomingCall.callId, 'accepted');
     const roomId = zegoService.generateRoomId(incomingCall.caller.id);
 
     setActiveCall({
@@ -151,7 +166,7 @@ function AppContent() {
   // Decline incoming call
   const declineIncomingCall = async () => {
     if (incomingCall) {
-      await firestoreService.updateCallStatus(incomingCall.callId, 'rejected');
+      await supabaseService.updateCallStatus(incomingCall.callId, 'rejected');
     }
     setIncomingCall(null);
   };
@@ -159,15 +174,43 @@ function AppContent() {
   // End active call
   const endActiveCall = async () => {
     if (activeCall) {
-      await firestoreService.updateCallStatus(activeCall.id, 'ended', activeCall.durationSeconds);
+      await supabaseService.updateCallStatus(activeCall.id, 'ended', activeCall.durationSeconds);
       setActiveCall(null);
     }
   };
 
-  // Send real Firestore message
-  const handleSendMessage = async (text: string, type: 'text' | 'audio' | 'image' = 'text', mediaUrl?: string) => {
+  // Select user and start/open conversation
+  const handleSelectUser = async (user: User) => {
+    if (!currentUser) return;
+    await supabaseService.ensureConversation(currentUser.id, user.id);
+    setSelectedUser(user);
+  };
+
+  // Send real Supabase message
+  const handleSendMessage = async (
+    text: string,
+    type: 'text' | 'audio' | 'image' | 'file' = 'text',
+    mediaUrl?: string,
+    fileName?: string,
+    replyTo?: { id: string; text: string; senderName?: string }
+  ) => {
     if (!selectedUser || !currentUser) return;
-    await firestoreService.sendMessage(currentUser.id, selectedUser.id, text, type, mediaUrl);
+    await supabaseService.sendMessage(
+      currentUser.id,
+      selectedUser.id,
+      text,
+      type,
+      mediaUrl,
+      fileName,
+      replyTo
+    );
+  };
+
+  // Delete message
+  const handleDeleteMessage = async (messageId: string) => {
+    if (!selectedUser || !currentUser) return;
+    const convId = supabaseService.getConversationId(currentUser.id, selectedUser.id);
+    await supabaseService.deleteMessage(convId, messageId);
   };
 
   const missedCount = callLogs.filter((c) => c.direction === 'missed').length;
@@ -217,6 +260,7 @@ function AppContent() {
               messages={messages[selectedUser.id] || []}
               onBack={() => setSelectedUser(null)}
               onSendMessage={handleSendMessage}
+              onDeleteMessage={handleDeleteMessage}
               onStartCall={startCall}
             />
           ) : (
@@ -224,10 +268,11 @@ function AppContent() {
               {activeTab === 'chats' && (
                 <ChatList
                   users={users}
+                  conversations={conversations}
                   messages={messages}
-                  onSelectUser={(u) => setSelectedUser(u)}
+                  onSelectUser={handleSelectUser}
                   onStartCall={startCall}
-                  onNewChat={() => setActiveTab('contacts')}
+                  onNewChat={() => setShowNewChatModal(true)}
                 />
               )}
 
@@ -236,14 +281,14 @@ function AppContent() {
                   callLogs={callLogs}
                   users={users}
                   onStartCall={startCall}
-                  onNewCall={() => setActiveTab('contacts')}
+                  onNewCall={() => setShowNewChatModal(true)}
                 />
               )}
 
               {activeTab === 'contacts' && (
                 <ContactsList
                   users={users}
-                  onSelectUser={(u) => setSelectedUser(u)}
+                  onSelectUser={handleSelectUser}
                   onStartCall={startCall}
                 />
               )}
@@ -268,6 +313,15 @@ function AppContent() {
           />
         )}
       </div>
+
+      {/* New Chat User Selection Modal */}
+      {showNewChatModal && (
+        <NewChatModal
+          users={users}
+          onSelectUser={handleSelectUser}
+          onClose={() => setShowNewChatModal(false)}
+        />
+      )}
 
       {/* Firebase Auth Modal */}
       {showAuthModal && (
