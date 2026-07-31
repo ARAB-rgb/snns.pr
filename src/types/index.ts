@@ -1,5 +1,14 @@
 import { LanguageCode } from './i18n';
 
+export interface PrivacySettings {
+  lastSeenVisibility: 'everyone' | 'followers' | 'nobody';
+  hideOnlineStatus: boolean;
+  readReceipts: boolean;
+  profilePhotoVisibility: 'everyone' | 'followers' | 'nobody';
+  allowCallFrom: 'everyone' | 'followers';
+  blockedUserIds: string[];
+}
+
 export interface User {
   id: string;
   name: string;
@@ -10,6 +19,10 @@ export interface User {
   email?: string;
   isOnline: boolean;
   lastSeen?: string;
+  followersCount?: number;
+  followingCount?: number;
+  isFollowedByMe?: boolean;
+  privacySettings?: PrivacySettings;
 }
 
 export type MessageType = 'text' | 'audio' | 'image' | 'file' | 'call_log';

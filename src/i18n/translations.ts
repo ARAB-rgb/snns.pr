@@ -75,7 +75,7 @@ export interface Translations {
 
 export const TRANSLATIONS: Record<LanguageCode, Translations> = {
   en: {
-    appName: 'ZegoConnect Flutter',
+    appName: 'SNNS.PRO',
     chats: 'Chats',
     calls: 'Calls',
     contacts: 'Contacts',
@@ -147,7 +147,7 @@ export const TRANSLATIONS: Record<LanguageCode, Translations> = {
     zegoLiveRoomActive: 'ZegoLive Room Connected'
   },
   ar: {
-    appName: 'زيجو كونكت فلاتر',
+    appName: 'SNNS.PRO',
     chats: 'المحادثات',
     calls: 'المكالمات',
     contacts: 'جهات الاتصال',
@@ -219,7 +219,7 @@ export const TRANSLATIONS: Record<LanguageCode, Translations> = {
     zegoLiveRoomActive: 'غرفة زيجو المباشرة متصلة'
   },
   ur: {
-    appName: 'زیگو کنیکٹ فلٹر',
+    appName: 'SNNS.PRO',
     chats: 'چیٹس',
     calls: 'کالز',
     contacts: 'رابطے',
@@ -291,7 +291,7 @@ export const TRANSLATIONS: Record<LanguageCode, Translations> = {
     zegoLiveRoomActive: 'زیگو لائیو روم منسلک ہے'
   },
   am: {
-    appName: 'ZegoConnect ፍላተር',
+    appName: 'SNNS.PRO',
     chats: 'ወሬዎች',
     calls: 'ጥሪዎች',
     contacts: 'እውቂያዎች',
@@ -363,7 +363,7 @@ export const TRANSLATIONS: Record<LanguageCode, Translations> = {
     zegoLiveRoomActive: 'ZegoLive ክፍል ተገናኝቷል'
   },
   bn: {
-    appName: 'জেগো-কানেক্ট ফ্লাটার',
+    appName: 'SNNS.PRO',
     chats: 'চ্যাট',
     calls: 'কল',
     contacts: 'যোগাযোগ',
@@ -435,7 +435,7 @@ export const TRANSLATIONS: Record<LanguageCode, Translations> = {
     zegoLiveRoomActive: 'জেগোলাইভ রুম সংযুক্ত'
   },
   zh: {
-    appName: 'ZegoConnect Flutter',
+    appName: 'SNNS.PRO',
     chats: '聊天',
     calls: '通话',
     contacts: '联系人',

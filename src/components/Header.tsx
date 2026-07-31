@@ -20,7 +20,7 @@ export const Header: React.FC<HeaderProps> = ({ currentUser, onOpenSettings, onO
       <div className="flex items-center gap-3">
         <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-cyan-600 to-teal-500 p-0.5 shadow-md shadow-cyan-900/30 flex items-center justify-center">
           <div className="w-full h-full bg-slate-950 rounded-[14px] flex items-center justify-center">
-            <span className="text-cyan-400 font-black text-lg tracking-tighter">Z</span>
+            <span className="text-cyan-400 font-black text-lg tracking-tighter">S</span>
           </div>
         </div>
 

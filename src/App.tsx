@@ -12,6 +12,7 @@ import { ContactsList } from './components/ContactsList';
 import { SettingsScreen } from './components/SettingsScreen';
 import { AuthModal } from './components/AuthModal';
 import { NewChatModal } from './components/NewChatModal';
+import { PrivacyModal } from './components/PrivacyModal';
 
 import { User, Message, CallLog, ActiveCallState } from './types';
 import { firebaseAuth } from './services/firebaseAuth';
@@ -33,6 +34,14 @@ function AppContent() {
   const [incomingCall, setIncomingCall] = useState<{ callId: string; caller: User; type: 'audio' | 'video' } | null>(null);
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [showNewChatModal, setShowNewChatModal] = useState(false);
+  const [showPrivacyModal, setShowPrivacyModal] = useState(false);
+
+  const refreshUsers = () => {
+    if (!currentUser) return;
+    supabaseService.subscribeUsers(currentUser.id, (userList) => {
+      setUsers(userList);
+    });
+  };
 
   // Subscribe to Firebase Auth User Changes
   useEffect(() => {
@@ -287,9 +296,11 @@ function AppContent() {
 
               {activeTab === 'contacts' && (
                 <ContactsList
+                  currentUser={currentUser}
                   users={users}
                   onSelectUser={handleSelectUser}
                   onStartCall={startCall}
+                  onRefreshUsers={refreshUsers}
                 />
               )}
 
@@ -297,6 +308,7 @@ function AppContent() {
                 <SettingsScreen
                   currentUser={currentUser}
                   onOpenAuth={() => setShowAuthModal(true)}
+                  onOpenPrivacy={() => setShowPrivacyModal(true)}
                 />
               )}
             </>
@@ -328,6 +340,16 @@ function AppContent() {
         <AuthModal
           currentUser={currentUser}
           onClose={() => setShowAuthModal(false)}
+        />
+      )}
+
+      {/* Privacy Settings Modal */}
+      {showPrivacyModal && (
+        <PrivacyModal
+          currentUser={currentUser}
+          users={users}
+          onClose={() => setShowPrivacyModal(false)}
+          onUpdateUserPrivacy={refreshUsers}
         />
       )}
     </FlutterPhoneFrame>

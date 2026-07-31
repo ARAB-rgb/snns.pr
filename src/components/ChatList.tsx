@@ -3,6 +3,7 @@ import { Search, Plus, Video, Phone, CheckCheck, MessageSquare } from 'lucide-re
 import { User, Message } from '../types';
 import { useLanguage } from '../i18n/LanguageContext';
 import { SUPPORTED_LANGUAGES } from '../types/i18n';
+import { OnlineUsersBar } from './OnlineUsersBar';
 
 interface ChatListProps {
   users: User[];
@@ -69,6 +70,13 @@ export const ChatList: React.FC<ChatListProps> = ({
           />
         </div>
       </div>
+
+      {/* Online Users Active Bar */}
+      <OnlineUsersBar
+        users={users}
+        onSelectUser={onSelectUser}
+        onStartCall={onStartCall}
+      />
 
       {/* Chat Items List */}
       <div className="flex-1 overflow-y-auto divide-y divide-slate-800/50 p-2 space-y-1">

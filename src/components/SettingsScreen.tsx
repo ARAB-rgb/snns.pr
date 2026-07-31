@@ -1,5 +1,5 @@
 import React from 'react';
-import { Globe, Shield, Sparkles, Check, RefreshCw, LogOut } from 'lucide-react';
+import { Globe, Shield, Sparkles, Check, RefreshCw, LogOut, Lock, Users, UserCheck, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useLanguage } from '../i18n/LanguageContext';
 import { SUPPORTED_LANGUAGES, LanguageCode } from '../types/i18n';
 import { User } from '../types';
@@ -9,44 +9,96 @@ import { sounds } from '../services/audioSynthesizer';
 interface SettingsScreenProps {
   currentUser: User;
   onOpenAuth: () => void;
+  onOpenPrivacy: () => void;
 }
 
-export const SettingsScreen: React.FC<SettingsScreenProps> = ({ currentUser, onOpenAuth }) => {
+export const SettingsScreen: React.FC<SettingsScreenProps> = ({
+  currentUser,
+  onOpenAuth,
+  onOpenPrivacy
+}) => {
   const { currentLang, setLanguage, autoDetect, setAutoDetect, direction, t } = useLanguage();
 
   return (
-    <div className="flex-1 flex flex-col bg-slate-900 overflow-y-auto p-4 space-y-5 text-slate-100">
+    <div className="flex-1 flex flex-col bg-slate-900 overflow-y-auto p-4 space-y-4 text-slate-100">
       {/* Profile Header */}
-      <div className="bg-slate-800/90 rounded-3xl p-4 border border-slate-700/80 shadow-md flex items-center justify-between">
+      <div className="bg-slate-800/90 rounded-3xl p-4 border border-slate-700/80 shadow-md flex flex-col gap-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <img
+              src={currentUser.avatar}
+              alt={currentUser.name}
+              className="w-14 h-14 rounded-full object-cover border-2 border-cyan-400 shadow-md"
+            />
+            <div>
+              <h2 className="text-sm font-bold text-white flex items-center gap-1.5">
+                <span>{currentUser.name}</span>
+                <span className="text-[10px] bg-cyan-500/20 text-cyan-300 px-2 py-0.5 rounded-full border border-cyan-500/30">
+                  {SUPPORTED_LANGUAGES[currentUser.language]?.flag}
+                </span>
+              </h2>
+              <p className="text-[11px] text-slate-400 truncate max-w-[180px] sm:max-w-[240px]">
+                {currentUser.email || currentUser.phone || currentUser.statusText}
+              </p>
+            </div>
+          </div>
+
+          <button
+            onClick={onOpenAuth}
+            className="p-2.5 rounded-2xl bg-cyan-600/20 hover:bg-cyan-600/30 text-cyan-300 border border-cyan-500/30 text-xs font-semibold cursor-pointer transition-all flex items-center gap-1.5"
+          >
+            <RefreshCw className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">{t('switchAccount')}</span>
+          </button>
+        </div>
+
+        {/* Follow Stats */}
+        <div className="flex items-center justify-around pt-2 border-t border-slate-700/60 text-center">
+          <div className="flex items-center gap-1.5">
+            <Users className="w-4 h-4 text-cyan-400" />
+            <div className="text-xs">
+              <span className="font-bold text-white">{currentUser.followersCount || 0}</span>
+              <span className="text-slate-400 mr-1">المتابعون</span>
+            </div>
+          </div>
+          <div className="h-4 w-px bg-slate-700" />
+          <div className="flex items-center gap-1.5">
+            <UserCheck className="w-4 h-4 text-teal-400" />
+            <div className="text-xs">
+              <span className="font-bold text-white">{currentUser.followingCount || 0}</span>
+              <span className="text-slate-400 mr-1">يتابع</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* 1. Privacy & Security Entry */}
+      <button
+        onClick={onOpenPrivacy}
+        className="w-full bg-slate-800/80 hover:bg-slate-800 rounded-3xl p-4 border border-slate-700/80 shadow-sm flex items-center justify-between text-right cursor-pointer transition-all group"
+      >
         <div className="flex items-center gap-3">
-          <img
-            src={currentUser.avatar}
-            alt={currentUser.name}
-            className="w-14 h-14 rounded-full object-cover border-2 border-cyan-400 shadow-md"
-          />
+          <div className="p-2.5 rounded-2xl bg-cyan-500/20 text-cyan-400 border border-cyan-500/30">
+            <Lock className="w-5 h-5" />
+          </div>
           <div>
-            <h2 className="text-sm font-bold text-white flex items-center gap-1.5">
-              <span>{currentUser.name}</span>
-              <span className="text-[10px] bg-cyan-500/20 text-cyan-300 px-2 py-0.5 rounded-full border border-cyan-500/30">
-                {SUPPORTED_LANGUAGES[currentUser.language]?.flag}
-              </span>
-            </h2>
-            <p className="text-[11px] text-slate-400 truncate max-w-[180px] sm:max-w-[240px]">
-              {currentUser.email || currentUser.phone || currentUser.statusText}
+            <h3 className="text-xs font-bold text-slate-100 group-hover:text-cyan-300 transition-colors">
+              إعدادات الخصوصية والأمان
+            </h3>
+            <p className="text-[11px] text-slate-400">
+              آخر ظهور، المتصل الآن، المحظورون، ومؤشرات القراءة
             </p>
           </div>
         </div>
 
-        <button
-          onClick={onOpenAuth}
-          className="p-2.5 rounded-2xl bg-cyan-600/20 hover:bg-cyan-600/30 text-cyan-300 border border-cyan-500/30 text-xs font-semibold cursor-pointer transition-all flex items-center gap-1.5"
-        >
-          <RefreshCw className="w-3.5 h-3.5" />
-          <span className="hidden sm:inline">{t('switchAccount')}</span>
-        </button>
-      </div>
+        {direction === 'rtl' ? (
+          <ChevronLeft className="w-5 h-5 text-slate-400 group-hover:text-slate-200 transition-colors" />
+        ) : (
+          <ChevronRight className="w-5 h-5 text-slate-400 group-hover:text-slate-200 transition-colors" />
+        )}
+      </button>
 
-      {/* 1. Language & Direction Settings */}
+      {/* 2. Language & Direction Settings */}
       <div className="bg-slate-800/60 rounded-3xl p-4 border border-slate-700/60 space-y-3">
         <div className="flex items-center justify-between pb-2 border-b border-slate-700/60">
           <div className="flex items-center gap-2">

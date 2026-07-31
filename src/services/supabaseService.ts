@@ -1,12 +1,142 @@
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
-import { User, Message, CallLog } from '../types';
+import { User, Message, CallLog, PrivacySettings } from '../types';
 
 export class SupabaseService {
-  // Sync user profile in Supabase 'profiles' table
+  // Helper for localStorage state fallback
+  private getLocalFollows(userId: string): string[] {
+    try {
+      const data = localStorage.getItem(`follows_${userId}`);
+      return data ? JSON.parse(data) : [];
+    } catch (e) {
+      return [];
+    }
+  }
+
+  private setLocalFollows(userId: string, follows: string[]) {
+    try {
+      localStorage.setItem(`follows_${userId}`, JSON.stringify(follows));
+    } catch (e) {}
+  }
+
+  private getLocalFollowers(userId: string): string[] {
+    try {
+      const data = localStorage.getItem(`followers_${userId}`);
+      return data ? JSON.parse(data) : [];
+    } catch (e) {
+      return [];
+    }
+  }
+
+  private setLocalFollowers(userId: string, followers: string[]) {
+    try {
+      localStorage.setItem(`followers_${userId}`, JSON.stringify(followers));
+    } catch (e) {}
+  }
+
+  getLocalPrivacy(userId: string): PrivacySettings {
+    const defaultPrivacy: PrivacySettings = {
+      lastSeenVisibility: 'everyone',
+      hideOnlineStatus: false,
+      readReceipts: true,
+      profilePhotoVisibility: 'everyone',
+      allowCallFrom: 'everyone',
+      blockedUserIds: []
+    };
+    try {
+      const data = localStorage.getItem(`privacy_${userId}`);
+      return data ? { ...defaultPrivacy, ...JSON.parse(data) } : defaultPrivacy;
+    } catch (e) {
+      return defaultPrivacy;
+    }
+  }
+
+  setLocalPrivacy(userId: string, settings: PrivacySettings) {
+    try {
+      localStorage.setItem(`privacy_${userId}`, JSON.stringify(settings));
+    } catch (e) {}
+  }
+
+  // Toggle Follow / Unfollow user
+  async toggleFollow(currentUserId: string, targetUserId: string): Promise<boolean> {
+    const following = this.getLocalFollows(currentUserId);
+    const targetFollowers = this.getLocalFollowers(targetUserId);
+    const isFollowing = following.includes(targetUserId);
+
+    let nextFollowing: string[];
+    let nextTargetFollowers: string[];
+
+    if (isFollowing) {
+      nextFollowing = following.filter((id) => id !== targetUserId);
+      nextTargetFollowers = targetFollowers.filter((id) => id !== currentUserId);
+    } else {
+      nextFollowing = [...following, targetUserId];
+      nextTargetFollowers = [...targetFollowers, currentUserId];
+    }
+
+    this.setLocalFollows(currentUserId, nextFollowing);
+    this.setLocalFollowers(targetUserId, nextTargetFollowers);
+
+    // Sync to Supabase if table exists
+    if (isSupabaseConfigured) {
+      try {
+        if (isFollowing) {
+          await supabase.from('follows').delete().match({ follower_id: currentUserId, followed_id: targetUserId });
+        } else {
+          await supabase.from('follows').upsert({ follower_id: currentUserId, followed_id: targetUserId }, { onConflict: 'follower_id,followed_id' });
+        }
+      } catch (err) {
+        // Fallback handled silently
+      }
+    }
+
+    return !isFollowing;
+  }
+
+  // Toggle Block / Unblock user
+  async toggleBlockUser(currentUserId: string, targetUserId: string): Promise<boolean> {
+    const privacy = this.getLocalPrivacy(currentUserId);
+    const isBlocked = privacy.blockedUserIds.includes(targetUserId);
+
+    const nextBlocked = isBlocked
+      ? privacy.blockedUserIds.filter((id) => id !== targetUserId)
+      : [...privacy.blockedUserIds, targetUserId];
+
+    const updatedPrivacy = { ...privacy, blockedUserIds: nextBlocked };
+    this.setLocalPrivacy(currentUserId, updatedPrivacy);
+
+    if (isSupabaseConfigured) {
+      try {
+        if (isBlocked) {
+          await supabase.from('blocked_users').delete().match({ blocker_id: currentUserId, blocked_id: targetUserId });
+        } else {
+          await supabase.from('blocked_users').upsert({ blocker_id: currentUserId, blocked_id: targetUserId }, { onConflict: 'blocker_id,blocked_id' });
+        }
+      } catch (e) {}
+    }
+
+    return !isBlocked;
+  }
+
+  // Update privacy settings
+  async updatePrivacySettings(currentUserId: string, settings: PrivacySettings): Promise<void> {
+    this.setLocalPrivacy(currentUserId, settings);
+
+    if (isSupabaseConfigured) {
+      try {
+        await supabase.from('user_privacy').upsert({
+          user_id: currentUserId,
+          settings,
+          updated_at: new Date().toISOString()
+        }, { onConflict: 'user_id' });
+      } catch (e) {}
+    }
+  }
+
+  // Sync user profile in Supabase 'profiles' table with error resilience and fallbacks
   async syncUserProfile(user: User): Promise<void> {
     if (!isSupabaseConfigured) return;
     try {
-      const payload = {
+      const payload: Record<string, any> = {
         id: user.id,
         name: user.name,
         email: user.email || '',
@@ -18,12 +148,21 @@ export class SupabaseService {
         updated_at: new Date().toISOString()
       };
 
+      // 1. Attempt upsert
       const { error } = await supabase.from('profiles').upsert(payload, { onConflict: 'id' });
       if (error) {
-        console.error('Error syncing profile to Supabase:', error);
+        // 2. Fallback: try update first
+        const { error: updateErr } = await supabase.from('profiles').update(payload).eq('id', user.id);
+        if (updateErr) {
+          // 3. Fallback: try insert
+          const { error: insertErr } = await supabase.from('profiles').insert([payload]);
+          if (insertErr) {
+            console.info('Supabase profiles sync handled gracefully:', insertErr.message || insertErr);
+          }
+        }
       }
     } catch (err) {
-      console.error('Error in syncUserProfile:', err);
+      console.info('syncUserProfile non-blocking notice:', err);
     }
   }
 
@@ -41,7 +180,7 @@ export class SupabaseService {
     }
   }
 
-  // Subscribe to real users list from 'profiles' table
+  // Subscribe to real users list from 'profiles' table with Follows & Privacy enrichment
   subscribeUsers(currentUserId: string, callback: (users: User[]) => void): () => void {
     if (!isSupabaseConfigured) {
       callback([]);
@@ -55,20 +194,50 @@ export class SupabaseService {
         .neq('id', currentUserId);
 
       if (!error && data) {
-        const userList: User[] = data.map((p: any) => ({
-          id: p.id,
-          name: p.name || p.email?.split('@')[0] || 'مستخدم',
-          avatar: p.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
-          email: p.email,
-          phone: p.phone,
-          language: p.language || 'ar',
-          isOnline: p.is_online ?? false,
-          lastSeen: p.last_seen
+        const myFollowing = this.getLocalFollows(currentUserId);
+        const myPrivacy = this.getLocalPrivacy(currentUserId);
+
+        const userList: User[] = data.map((p: any) => {
+          const userFollowers = this.getLocalFollowers(p.id);
+          const isFollowed = myFollowing.includes(p.id);
+          const userPrivacy = this.getLocalPrivacy(p.id);
+
+          // Respect privacy setting for online status
+          let isOnline = p.is_online ?? false;
+          if (userPrivacy.hideOnlineStatus) {
+            isOnline = false;
+          }
+
+          let lastSeenText = p.last_seen
             ? new Date(p.last_seen).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-            : 'غير متصل',
-          statusText: p.is_online ? 'متصل الآن' : 'غير متصل'
-        }));
-        callback(userList);
+            : 'غير متصل';
+
+          if (userPrivacy.lastSeenVisibility === 'nobody') {
+            lastSeenText = 'مخفي';
+          } else if (userPrivacy.lastSeenVisibility === 'followers' && !isFollowed) {
+            lastSeenText = 'للمتابعين فقط';
+          }
+
+          return {
+            id: p.id,
+            name: p.name || p.email?.split('@')[0] || 'مستخدم',
+            avatar: p.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
+            email: p.email,
+            phone: p.phone,
+            language: p.language || 'ar',
+            isOnline,
+            lastSeen: lastSeenText,
+            statusText: isOnline ? 'متصل الآن' : lastSeenText,
+            followersCount: userFollowers.length,
+            followingCount: this.getLocalFollows(p.id).length,
+            isFollowedByMe: isFollowed,
+            privacySettings: userPrivacy
+          };
+        });
+
+        // Filter out blocked users
+        const filteredList = userList.filter((u) => !myPrivacy.blockedUserIds.includes(u.id));
+        callback(filteredList);
       }
     };
 
