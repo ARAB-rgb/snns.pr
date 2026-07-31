@@ -14,13 +14,13 @@ import { AuthModal } from './components/AuthModal';
 import { NewChatModal } from './components/NewChatModal';
 
 import { User, Message, CallLog, ActiveCallState } from './types';
-import { supabaseAuth } from './services/supabaseAuth';
+import { firebaseAuth } from './services/firebaseAuth';
 import { supabaseService } from './services/supabaseService';
 import { zegoService } from './services/zegocloud';
 import { sounds } from './services/audioSynthesizer';
 
 function AppContent() {
-  const [currentUser, setCurrentUser] = useState<User | null>(supabaseAuth.getActiveUser());
+  const [currentUser, setCurrentUser] = useState<User | null>(firebaseAuth.getActiveUser());
   const [activeTab, setActiveTab] = useState<TabType>('chats');
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
 
@@ -34,9 +34,9 @@ function AppContent() {
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [showNewChatModal, setShowNewChatModal] = useState(false);
 
-  // Subscribe to Supabase Auth User Changes
+  // Subscribe to Firebase Auth User Changes
   useEffect(() => {
-    const unsubscribe = supabaseAuth.onUserChange((user) => {
+    const unsubscribe = firebaseAuth.onUserChange((user) => {
       setCurrentUser(user);
     });
     return () => unsubscribe();

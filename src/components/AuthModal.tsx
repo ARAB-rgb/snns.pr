@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Shield, LogOut, AlertTriangle } from 'lucide-react';
 import { User } from '../types';
 import { useLanguage } from '../i18n/LanguageContext';
-import { supabaseAuth } from '../services/supabaseAuth';
+import { firebaseAuth } from '../services/firebaseAuth';
 import { SUPPORTED_LANGUAGES } from '../types/i18n';
 
 interface AuthModalProps {
@@ -18,7 +18,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ currentUser, onClose }) =>
   const handleGoogleSignIn = async () => {
     setLoading(true);
     setAuthError(null);
-    const result = await supabaseAuth.signInWithGoogle();
+    const result = await firebaseAuth.signInWithGoogle();
     setLoading(false);
 
     if (result.user) {
@@ -29,7 +29,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ currentUser, onClose }) =>
   };
 
   const handleLogout = async () => {
-    await supabaseAuth.logout();
+    await firebaseAuth.logout();
     if (onClose) onClose();
   };
 
