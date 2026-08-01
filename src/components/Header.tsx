@@ -3,6 +3,7 @@ import { Globe, Check, User as UserIcon, Sparkles } from 'lucide-react';
 import { useLanguage } from '../i18n/LanguageContext';
 import { SUPPORTED_LANGUAGES, LanguageCode } from '../types/i18n';
 import { User } from '../types';
+import { RealtimeStatusIndicator } from './RealtimeStatusIndicator';
 
 interface HeaderProps {
   currentUser: User;
@@ -43,8 +44,11 @@ export const Header: React.FC<HeaderProps> = ({ currentUser, onOpenSettings, onO
         </div>
       </div>
 
-      {/* Right Controls: Quick Language Switcher & Auth Profile */}
+      {/* Right Controls: Diagnostic Indicator, Language Switcher & Auth Profile */}
       <div className="flex items-center gap-2.5">
+        {/* Realtime Socket & Diagnostic Indicator */}
+        <RealtimeStatusIndicator />
+
         {/* Language Quick Dropdown */}
         <div className="relative">
           <button
