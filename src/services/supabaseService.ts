@@ -593,37 +593,58 @@ export class SupabaseService {
     };
   }
 
+  // Create call record with status (ringing, accepted, rejected, missed, ended)
+  async createCallRecord(params: {
+    id?: string;
+    caller_id: string;
+    receiver_id: string;
+    type: 'audio' | 'video';
+    status: 'ringing' | 'accepted' | 'rejected' | 'missed' | 'ended';
+  }): Promise<string | null> {
+    if (!isSupabaseConfigured) return null;
+
+    try {
+      const channelId = `zego_call_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+
+      const payload: Record<string, any> = {
+        caller_id: params.caller_id,
+        receiver_id: params.receiver_id,
+        type: params.type,
+        status: params.status,
+        channel_id: channelId,
+        started_at: new Date().toISOString()
+      };
+
+      if (params.id) {
+        payload.id = params.id;
+      }
+
+      const { data, error } = await supabase.from('calls').upsert(payload).select('id').single();
+
+      if (error) {
+        console.info('createCallRecord note:', error.message || error);
+        return params.id || null;
+      }
+
+      return data?.id || params.id || null;
+    } catch (err) {
+      console.warn('createCallRecord notice:', err);
+      return params.id || null;
+    }
+  }
+
   // Create real call row in Supabase
   async createCall(
     callerId: string,
     receiverId: string,
     type: 'audio' | 'video'
   ): Promise<string | null> {
-    if (!isSupabaseConfigured) return null;
-
-    const channelId = `zego_room_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
-
-    const { data, error } = await supabase.from('calls').insert({
+    return this.createCallRecord({
       caller_id: callerId,
       receiver_id: receiverId,
       type,
-      status: 'ringing',
-      channel_id: channelId,
-      started_at: new Date().toISOString()
-    }).select('id').single();
-
-    if (error || !data) {
-      console.error('Failed to create call row:', error);
-      return null;
-    }
-
-    // Also add participants
-    await supabase.from('call_participants').insert([
-      { call_id: data.id, user_id: callerId },
-      { call_id: data.id, user_id: receiverId }
-    ]);
-
-    return data.id;
+      status: 'ringing'
+    });
   }
 
   // Subscribe to Incoming Calls in Realtime
@@ -675,7 +696,7 @@ export class SupabaseService {
   }
 
   // Update Call Status
-  async updateCallStatus(callId: string, status: 'accepted' | 'rejected' | 'ended', durationSec?: number): Promise<void> {
+  async updateCallStatus(callId: string, status: 'ringing' | 'accepted' | 'rejected' | 'missed' | 'ended', durationSec?: number): Promise<void> {
     if (!isSupabaseConfigured) return;
 
     try {

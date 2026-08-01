@@ -15,6 +15,7 @@
     "@supabase/supabase-js": "^2.111.0",
     "@tailwindcss/vite": "^4.1.14",
     "@vitejs/plugin-react": "^5.0.4",
+    "@zegocloud/zego-uikit-prebuilt": "^2.18.1",
     "dotenv": "^17.2.3",
     "express": "^4.21.2",
     "firebase": "^12.17.0",
@@ -22,7 +23,8 @@
     "motion": "^12.23.24",
     "react": "^19.0.1",
     "react-dom": "^19.0.1",
-    "vite": "^6.2.3"
+    "vite": "^6.2.3",
+    "zego-zim-web": "^3.1.0"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",
