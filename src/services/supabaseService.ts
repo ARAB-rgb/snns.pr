@@ -1,6 +1,72 @@
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { User, Message, CallLog, PrivacySettings, UserStatus } from '../types';
 
+export interface DiagnosticsInfo {
+  authStatus: 'Connected' | 'Failed';
+  dbStatus: 'Connected' | 'Failed' | 'Testing...';
+  realtimeStatus: 'SUBSCRIBED' | 'Connecting' | 'Failed';
+  lastInsertStatus: 'Success' | 'Failed' | 'None';
+  lastReceivedStatus: 'Success' | 'None';
+  lastConversationId?: string;
+  lastSenderId?: string;
+  lastReceiverId?: string;
+}
+
+class DiagnosticsManager {
+  private info: DiagnosticsInfo = {
+    authStatus: 'Connected',
+    dbStatus: 'Testing...',
+    realtimeStatus: 'Connecting',
+    lastInsertStatus: 'None',
+    lastReceivedStatus: 'None'
+  };
+
+  private listeners = new Set<(info: DiagnosticsInfo) => void>();
+
+  getDiagnostics(): DiagnosticsInfo {
+    return { ...this.info };
+  }
+
+  update(partial: Partial<DiagnosticsInfo>) {
+    this.info = { ...this.info, ...partial };
+    this.listeners.forEach((l) => l(this.info));
+  }
+
+  subscribe(listener: (info: DiagnosticsInfo) => void) {
+    this.listeners.add(listener);
+    listener(this.info);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  }
+
+  async runHealthCheck(currentUserId?: string) {
+    if (!isSupabaseConfigured) {
+      this.update({ authStatus: 'Failed', dbStatus: 'Failed', realtimeStatus: 'Failed' });
+      return;
+    }
+
+    try {
+      const { error } = await supabase.from('profiles').select('id').limit(1);
+      if (error) {
+        this.update({ dbStatus: 'Failed' });
+      } else {
+        this.update({ dbStatus: 'Connected' });
+      }
+    } catch {
+      this.update({ dbStatus: 'Failed' });
+    }
+
+    if (currentUserId) {
+      this.update({ authStatus: 'Connected' });
+    } else {
+      this.update({ authStatus: 'Failed' });
+    }
+  }
+}
+
+export const diagnosticsManager = new DiagnosticsManager();
+
 export function toUuidOrText(uid: string): string {
   if (!uid) return '00000000-0000-0000-0000-000000000000';
   const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -513,6 +579,9 @@ export class SupabaseService {
       return () => {};
     }
 
+    console.log('Supabase connected');
+    diagnosticsManager.update({ authStatus: 'Connected', dbStatus: 'Connected' });
+
     const fetchMessages = async () => {
       const { data, error } = await supabase
         .from('messages')
@@ -521,8 +590,10 @@ export class SupabaseService {
         .order('created_at', { ascending: true });
 
       if (error) {
-        console.error('❌ [subscribeMessages] Error fetching messages:', error);
+        console.error('Error fetching messages from database:', error.message);
+        diagnosticsManager.update({ dbStatus: 'Failed' });
       } else if (data) {
+        diagnosticsManager.update({ dbStatus: 'Connected' });
         const msgList: Message[] = data.map((m: any) => {
           const dateObj = m.created_at ? new Date(m.created_at) : new Date();
           return {
@@ -546,22 +617,39 @@ export class SupabaseService {
 
     fetchMessages();
 
+    console.log('Realtime channel created');
+    const channelName = `messages_${conversationId}`;
+
     const channel = supabase
-      .channel(`messages_${conversationId}`)
+      .channel(channelName)
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'messages' },
         (payload: any) => {
           if (!payload.new || payload.new.conversation_id === conversationId) {
+            console.log('Message received');
+            console.log('conversation_id:', payload.new?.conversation_id || conversationId);
+            console.log('sender_id:', payload.new?.sender_id);
+            console.log('receiver_id:', payload.new?.receiver_id);
+
+            diagnosticsManager.update({
+              lastReceivedStatus: 'Success',
+              lastConversationId: payload.new?.conversation_id || conversationId,
+              lastSenderId: payload.new?.sender_id,
+              lastReceiverId: payload.new?.receiver_id
+            });
+
             fetchMessages();
           }
         }
       )
       .subscribe((status, err) => {
         if (status === 'SUBSCRIBED') {
-          console.log(`📡 [Realtime] Messages channel active for conv ${conversationId}`);
+          console.log('SUBSCRIBED');
+          diagnosticsManager.update({ realtimeStatus: 'SUBSCRIBED' });
         } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-          console.warn(`⚠️ [Realtime] Messages subscription notice (${status}):`, err || 'Connecting...');
+          console.warn(`Realtime channel status notice (${status}):`, err || '');
+          diagnosticsManager.update({ realtimeStatus: 'Failed' });
         }
       });
 
@@ -582,27 +670,27 @@ export class SupabaseService {
     mediaUrl?: string,
     fileName?: string,
     replyTo?: { id: string; text: string; senderName?: string }
-  ): Promise<void> {
+  ): Promise<boolean> {
     if (!isSupabaseConfigured) {
-      console.warn('⚠️ [sendMessage] Supabase client is not configured.');
-      return;
+      console.warn('Supabase client is not configured.');
+      console.log('Message insert failed');
+      console.log('conversation_id:', this.getConversationId(senderId, receiverId));
+      console.log('sender_id:', senderId);
+      console.log('receiver_id:', receiverId);
+      diagnosticsManager.update({
+        lastInsertStatus: 'Failed',
+        lastConversationId: this.getConversationId(senderId, receiverId),
+        lastSenderId: senderId,
+        lastReceiverId: receiverId
+      });
+      return false;
     }
 
-    console.log('📤 [sendMessage] Dispatching message...', {
-      senderId,
-      receiverId,
-      type,
-      textPreview: text?.slice(0, 30),
-      hasMedia: !!mediaUrl,
-      fileName
-    });
+    const convId = await this.ensureConversation(senderId, receiverId);
+
+    const lastMsgText = type === 'image' ? '📷 صورة' : type === 'audio' ? '🎤 تسجيل صوتي' : type === 'file' ? '📁 ملف' : text;
 
     try {
-      const convId = await this.ensureConversation(senderId, receiverId);
-      console.log('📂 [sendMessage] Conversation ID ensured:', convId);
-
-      const lastMsgText = type === 'image' ? '📷 صورة' : type === 'audio' ? '🎤 تسجيل صوتي' : type === 'file' ? '📁 ملف' : text;
-
       const { data, error: msgError } = await supabase.from('messages').insert({
         conversation_id: convId,
         sender_id: senderId,
@@ -617,31 +705,54 @@ export class SupabaseService {
       }).select().single();
 
       if (msgError) {
-        console.error('❌ [sendMessage] Message insert error:', {
-          code: msgError.code,
-          message: msgError.message,
-          details: msgError.details,
-          hint: msgError.hint
+        console.error('Message insert failed', msgError.message || msgError);
+        console.log('conversation_id:', convId);
+        console.log('sender_id:', senderId);
+        console.log('receiver_id:', receiverId);
+
+        diagnosticsManager.update({
+          lastInsertStatus: 'Failed',
+          lastConversationId: convId,
+          lastSenderId: senderId,
+          lastReceiverId: receiverId
         });
-      } else {
-        console.log('✅ [sendMessage] Message successfully saved to Supabase:', data?.id);
+        return false;
       }
 
-      const { error: convError } = await supabase.from('conversations').update({
+      console.log('Message insert success');
+      console.log('conversation_id:', convId);
+      console.log('sender_id:', senderId);
+      console.log('receiver_id:', receiverId);
+
+      diagnosticsManager.update({
+        lastInsertStatus: 'Success',
+        lastConversationId: convId,
+        lastSenderId: senderId,
+        lastReceiverId: receiverId
+      });
+
+      // Update conversation summary
+      await supabase.from('conversations').update({
         last_message: lastMsgText,
         last_sender_id: senderId,
         last_message_time: new Date().toISOString(),
         updated_at: new Date().toISOString()
       }).eq('id', convId);
 
-      if (convError) {
-        console.error('⚠️ [sendMessage] Conversation update notice:', {
-          code: convError.code,
-          message: convError.message
-        });
-      }
-    } catch (err) {
-      console.error('💥 [sendMessage] Exception sending message:', err);
+      return true;
+    } catch (err: any) {
+      console.error('Message insert failed', err?.message || err);
+      console.log('conversation_id:', convId);
+      console.log('sender_id:', senderId);
+      console.log('receiver_id:', receiverId);
+
+      diagnosticsManager.update({
+        lastInsertStatus: 'Failed',
+        lastConversationId: convId,
+        lastSenderId: senderId,
+        lastReceiverId: receiverId
+      });
+      return false;
     }
   }
 

@@ -1,10 +1,10 @@
-import React from 'react';
-import { Globe, Shield, Sparkles, Check, RefreshCw, LogOut, Lock, Users, UserCheck, ChevronLeft, ChevronRight } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Globe, Shield, Sparkles, Check, RefreshCw, LogOut, Lock, Users, UserCheck, ChevronLeft, ChevronRight, Activity, Database, Radio, MessageSquare, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { useLanguage } from '../i18n/LanguageContext';
 import { SUPPORTED_LANGUAGES, LanguageCode } from '../types/i18n';
 import { User } from '../types';
 import { supabaseAuth } from '../services/supabaseAuth';
-import { sounds } from '../services/audioSynthesizer';
+import { diagnosticsManager, DiagnosticsInfo } from '../services/supabaseService';
 
 interface SettingsScreenProps {
   currentUser: User;
@@ -18,6 +18,19 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
   onOpenPrivacy
 }) => {
   const { currentLang, setLanguage, autoDetect, setAutoDetect, direction, t } = useLanguage();
+  const [diagInfo, setDiagInfo] = useState<DiagnosticsInfo>(diagnosticsManager.getDiagnostics());
+
+  useEffect(() => {
+    diagnosticsManager.runHealthCheck(currentUser.id);
+    const unsub = diagnosticsManager.subscribe((info) => {
+      setDiagInfo(info);
+    });
+    return () => unsub();
+  }, [currentUser.id]);
+
+  const handleTestDiagnostics = () => {
+    diagnosticsManager.runHealthCheck(currentUser.id);
+  };
 
   return (
     <div className="flex-1 flex flex-col bg-slate-900 overflow-y-auto p-4 space-y-4 text-slate-100">
@@ -70,6 +83,122 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
             </div>
           </div>
         </div>
+      </div>
+
+      {/* Diagnostics Panel */}
+      <div className="bg-slate-800/80 rounded-3xl p-4 border border-slate-700/80 shadow-md space-y-3">
+        <div className="flex items-center justify-between pb-2 border-b border-slate-700/60">
+          <div className="flex items-center gap-2">
+            <Activity className="w-4 h-4 text-cyan-400" />
+            <h3 className="text-xs font-bold text-slate-100 uppercase tracking-wider">صفحة التشخيص (Diagnostics)</h3>
+          </div>
+          <button
+            onClick={handleTestDiagnostics}
+            className="text-[10px] bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 px-2.5 py-1 rounded-full border border-cyan-500/30 cursor-pointer transition-all flex items-center gap-1"
+          >
+            <RefreshCw className="w-3 h-3" />
+            <span>فحص الاتصال</span>
+          </button>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+          {/* Auth */}
+          <div className="flex items-center justify-between p-2.5 bg-slate-900/60 rounded-2xl border border-slate-700/50">
+            <div className="flex items-center gap-2">
+              <Shield className="w-3.5 h-3.5 text-cyan-400" />
+              <span className="text-slate-300">Auth</span>
+            </div>
+            <span
+              className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                diagInfo.authStatus === 'Connected'
+                  ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                  : 'bg-red-500/20 text-red-300 border-red-500/40'
+              }`}
+            >
+              {diagInfo.authStatus}
+            </span>
+          </div>
+
+          {/* Database */}
+          <div className="flex items-center justify-between p-2.5 bg-slate-900/60 rounded-2xl border border-slate-700/50">
+            <div className="flex items-center gap-2">
+              <Database className="w-3.5 h-3.5 text-teal-400" />
+              <span className="text-slate-300">Database</span>
+            </div>
+            <span
+              className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                diagInfo.dbStatus === 'Connected'
+                  ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                  : 'bg-red-500/20 text-red-300 border-red-500/40'
+              }`}
+            >
+              {diagInfo.dbStatus}
+            </span>
+          </div>
+
+          {/* Realtime */}
+          <div className="flex items-center justify-between p-2.5 bg-slate-900/60 rounded-2xl border border-slate-700/50">
+            <div className="flex items-center gap-2">
+              <Radio className="w-3.5 h-3.5 text-amber-400" />
+              <span className="text-slate-300">Realtime</span>
+            </div>
+            <span
+              className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                diagInfo.realtimeStatus === 'SUBSCRIBED'
+                  ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                  : diagInfo.realtimeStatus === 'Connecting'
+                  ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                  : 'bg-red-500/20 text-red-300 border-red-500/40'
+              }`}
+            >
+              {diagInfo.realtimeStatus}
+            </span>
+          </div>
+
+          {/* Last message insert */}
+          <div className="flex items-center justify-between p-2.5 bg-slate-900/60 rounded-2xl border border-slate-700/50">
+            <div className="flex items-center gap-2">
+              <MessageSquare className="w-3.5 h-3.5 text-indigo-400" />
+              <span className="text-slate-300">Last message insert</span>
+            </div>
+            <span
+              className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                diagInfo.lastInsertStatus === 'Success'
+                  ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                  : diagInfo.lastInsertStatus === 'Failed'
+                  ? 'bg-red-500/20 text-red-300 border-red-500/40'
+                  : 'bg-slate-700/50 text-slate-400 border-slate-600/50'
+              }`}
+            >
+              {diagInfo.lastInsertStatus}
+            </span>
+          </div>
+
+          {/* Last received event */}
+          <div className="flex items-center justify-between p-2.5 bg-slate-900/60 rounded-2xl border border-slate-700/50 sm:col-span-2">
+            <div className="flex items-center gap-2">
+              <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
+              <span className="text-slate-300">Last received event</span>
+            </div>
+            <span
+              className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                diagInfo.lastReceivedStatus === 'Success'
+                  ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                  : 'bg-slate-700/50 text-slate-400 border-slate-600/50'
+              }`}
+            >
+              {diagInfo.lastReceivedStatus}
+            </span>
+          </div>
+        </div>
+
+        {diagInfo.lastConversationId && (
+          <div className="p-2.5 bg-slate-950/80 rounded-2xl border border-slate-800 text-[10px] font-mono space-y-1 text-slate-400">
+            <div><span className="text-cyan-400">conversation_id:</span> {diagInfo.lastConversationId}</div>
+            {diagInfo.lastSenderId && <div><span className="text-teal-400">sender_id:</span> {diagInfo.lastSenderId}</div>}
+            {diagInfo.lastReceiverId && <div><span className="text-indigo-400">receiver_id:</span> {diagInfo.lastReceiverId}</div>}
+          </div>
+        )}
       </div>
 
       {/* 1. Privacy & Security Entry */}
