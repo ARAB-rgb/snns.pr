@@ -71,6 +71,16 @@ export interface Translations {
   aboutDescription: string;
   copiedToClipboard: string;
   zegoLiveRoomActive: string;
+  status: string;
+  myStatus: string;
+  addStatus: string;
+  recentUpdates: string;
+  noStatusesYet: string;
+  typeStatusPlaceholder: string;
+  publishStatus: string;
+  expiresIn24Hours: string;
+  deleteStatus: string;
+  tapToView: string;
 }
 
 export const TRANSLATIONS: Record<LanguageCode, Translations> = {
@@ -144,7 +154,17 @@ export const TRANSLATIONS: Record<LanguageCode, Translations> = {
     aboutFlutterApp: 'Flutter Engine & i18n',
     aboutDescription: 'Built with Flutter-inspired Material 3 UI, ZegoCloud real-time audio/video engine, and multi-language auto-detection with native RTL support.',
     copiedToClipboard: 'Copied to clipboard!',
-    zegoLiveRoomActive: 'ZegoLive Room Connected'
+    zegoLiveRoomActive: 'ZegoLive Room Connected',
+    status: 'Status',
+    myStatus: 'My Status',
+    addStatus: 'Add Status',
+    recentUpdates: 'Recent Updates',
+    noStatusesYet: 'No active statuses right now. Share what is on your mind!',
+    typeStatusPlaceholder: 'Type a status update (expires in 24 hours)...',
+    publishStatus: 'Publish Status',
+    expiresIn24Hours: 'Disappears after 24 hours',
+    deleteStatus: 'Delete Status',
+    tapToView: 'Tap to view status'
   },
   ar: {
     appName: 'SNNS.PRO',
@@ -216,7 +236,17 @@ export const TRANSLATIONS: Record<LanguageCode, Translations> = {
     aboutFlutterApp: 'محرك فلاتر والدعم اللغوي',
     aboutDescription: 'تم التطوير باستخدام واجهة مستخدم فلاتر مادية 3، ومحرك زيجو كلاود للمكالمات الحية، ودعم تلقائي لـ 6 لغات مع اتجاه اليمين لليسام.',
     copiedToClipboard: 'تم النسخ إلى الحافظة!',
-    zegoLiveRoomActive: 'غرفة زيجو المباشرة متصلة'
+    zegoLiveRoomActive: 'غرفة زيجو المباشرة متصلة',
+    status: 'الحالات',
+    myStatus: 'حالتي',
+    addStatus: 'إضافة حالة',
+    recentUpdates: 'التحديثات الأخيرة',
+    noStatusesYet: 'لا توجد حالات نشطة حالياً. شارك ما يدور في ذهنك!',
+    typeStatusPlaceholder: 'اكتب تحديث حالتك (تختفي تلقائياً بعد 24 ساعة)...',
+    publishStatus: 'نشر الحالة',
+    expiresIn24Hours: 'تختفي بعد 24 ساعة',
+    deleteStatus: 'حذف الحالة',
+    tapToView: 'انقر لعرض الحالة'
   },
   ur: {
     appName: 'SNNS.PRO',
@@ -288,7 +318,17 @@ export const TRANSLATIONS: Record<LanguageCode, Translations> = {
     aboutFlutterApp: 'فلٹر انجن اور زبانیں',
     aboutDescription: 'میٹریل 3 لے آؤٹ، زیگو کلاؤڈ ریئل ٹائم کالز اور دائیں سے بائیں سپورٹ کے ساتھ ڈیزائن کیا گیا ہے۔',
     copiedToClipboard: 'کلپ بورڈ پر کاپی ہو گیا!',
-    zegoLiveRoomActive: 'زیگو لائیو روم منسلک ہے'
+    zegoLiveRoomActive: 'زیگو لائیو روم منسلک ہے',
+    status: 'اسٹیٹس',
+    myStatus: 'میرا اسٹیٹس',
+    addStatus: 'اسٹیٹس شامل کریں',
+    recentUpdates: 'حالیہ اپ ڈیٹس',
+    noStatusesYet: 'ابھی تک کوئی اسٹیٹس فعال نہیں ہے۔ اپنا خیال شیئر کریں!',
+    typeStatusPlaceholder: 'اپنا اسٹیٹس لکھیں (24 گھنٹے بعد ختم ہو جائے گا)...',
+    publishStatus: 'اسٹیٹس شائع کریں',
+    expiresIn24Hours: '24 گھنٹے بعد غائب ہو جائے گا',
+    deleteStatus: 'اسٹیٹس ڈیلیٹ کریں',
+    tapToView: 'اسٹیٹس دیکھنے کے لیے ٹیپ کریں'
   },
   am: {
     appName: 'SNNS.PRO',
@@ -360,7 +400,17 @@ export const TRANSLATIONS: Record<LanguageCode, Translations> = {
     aboutFlutterApp: 'የFlutter መተግበሪያ እና ቋንቋዎች',
     aboutDescription: 'በFlutter Material 3 ዲዛይን፣ ZegoCloud ጥሪዎች እና በ6 ቋንቋዎች ድጋፍ የተገነባ።',
     copiedToClipboard: 'ተቀድቷል!',
-    zegoLiveRoomActive: 'ZegoLive ክፍል ተገናኝቷል'
+    zegoLiveRoomActive: 'ZegoLive ክፍል ተገናኝቷል',
+    status: 'ሁኔታዎች',
+    myStatus: 'የእኔ ሁኔታ',
+    addStatus: 'ሁኔታ ጨምር',
+    recentUpdates: 'የቅርብ ጊዜ ዝመናዎች',
+    noStatusesYet: 'አሁን ምንም ንቁ ሁኔታዎች የሉም። ያሰቡትን ያጋሩ!',
+    typeStatusPlaceholder: 'ሁኔታዎን ይፃፉ (ከ24 ሰዓታት በኋላ ይጠፋል)...',
+    publishStatus: 'ሁኔታ ይለጥፉ',
+    expiresIn24Hours: 'ከ24 ሰዓታት በኋላ ይጠፋል',
+    deleteStatus: 'ሁኔታ ሰርዝ',
+    tapToView: 'ሁኔታውን ለማየት ይጫኑ'
   },
   bn: {
     appName: 'SNNS.PRO',
@@ -432,7 +482,17 @@ export const TRANSLATIONS: Record<LanguageCode, Translations> = {
     aboutFlutterApp: 'ফ্লাটার ইঞ্জিন ও ভাষা সাপোর্ট',
     aboutDescription: 'ফ্লাটার মেটেরিয়াল ৩ ডিজাইন, জেগোক্লাউড রিয়েল-টাইম ভিডিও কল এবং ৬টি ভাষা সমর্থিত।',
     copiedToClipboard: 'ক্লিপবোর্ডে কপি করা হয়েছে!',
-    zegoLiveRoomActive: 'জেগোলাইভ রুম সংযুক্ত'
+    zegoLiveRoomActive: 'জেগোলাইভ রুম সংযুক্ত',
+    status: 'স্ট্যাটাস',
+    myStatus: 'আমার স্ট্যাটাস',
+    addStatus: 'স্ট্যাটাস যোগ করুন',
+    recentUpdates: 'সাম্প্রতিক আপডেট',
+    noStatusesYet: 'এখন কোনো স্ট্যাটাস নেই। আপনার চিন্তাভাবনা শেয়ার করুন!',
+    typeStatusPlaceholder: 'একটি স্ট্যাটাস লিখুন (২৪ ঘণ্টা পর মুছে যাবে)...',
+    publishStatus: 'স্ট্যাটাস পোস্ট করুন',
+    expiresIn24Hours: '২৪ ঘণ্টা পর মুছে যাবে',
+    deleteStatus: 'স্ট্যাটাস মুছুন',
+    tapToView: 'স্ট্যাটাস দেখতে ট্যাপ করুন'
   },
   zh: {
     appName: 'SNNS.PRO',
@@ -504,6 +564,16 @@ export const TRANSLATIONS: Record<LanguageCode, Translations> = {
     aboutFlutterApp: 'Flutter 引擎与多语言',
     aboutDescription: '基于 Flutter Material 3 风格构建，搭载 ZegoCloud 实时音视频，原生支持 6 种语言及 RTL 布局。',
     copiedToClipboard: '已复制到剪贴板！',
-    zegoLiveRoomActive: 'ZegoLive 房间已连接'
+    zegoLiveRoomActive: 'ZegoLive 房间已连接',
+    status: '动态状态',
+    myStatus: '我的状态',
+    addStatus: '发布状态',
+    recentUpdates: '最新动态',
+    noStatusesYet: '暂无有效动态。分享您的想法吧！',
+    typeStatusPlaceholder: '写下您的状态（24小时后自动消失）...',
+    publishStatus: '发布状态',
+    expiresIn24Hours: '24小时后自动消失',
+    deleteStatus: '删除状态',
+    tapToView: '点击查看状态'
   }
 };

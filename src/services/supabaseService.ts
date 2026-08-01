@@ -1,5 +1,5 @@
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
-import { User, Message, CallLog, PrivacySettings } from '../types';
+import { User, Message, CallLog, PrivacySettings, UserStatus } from '../types';
 
 export function toUuidOrText(uid: string): string {
   if (!uid) return '00000000-0000-0000-0000-000000000000';
@@ -894,6 +894,209 @@ export class SupabaseService {
       }).eq('id', callId);
     } catch (err) {
       console.warn('Failed to update call status in Supabase:', err);
+    }
+  }
+
+  // --- USER STATUSES (24-Hour Disappearing Stories) ---
+  getLocalStatuses(): UserStatus[] {
+    try {
+      const stored = localStorage.getItem('snns_user_statuses');
+      if (stored) {
+        const parsed: UserStatus[] = JSON.parse(stored);
+        const now = new Date().getTime();
+        return parsed.filter(s => new Date(s.expiresAt).getTime() > now);
+      }
+    } catch (e) {
+      console.warn('Error reading local statuses:', e);
+    }
+
+    // Default sample statuses if none exist
+    const now = Date.now();
+    const demoStatuses: UserStatus[] = [
+      {
+        id: 'status-demo-1',
+        userId: '2',
+        userName: 'Sarah Chen',
+        userAvatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150',
+        text: 'Working on Flutter Material 3 design system updates! 🚀',
+        bgColor: 'from-cyan-600 to-blue-800',
+        createdAt: new Date(now - 2 * 3600 * 1000).toISOString(),
+        expiresAt: new Date(now + 22 * 3600 * 1000).toISOString(),
+        viewsCount: 12
+      },
+      {
+        id: 'status-demo-2',
+        userId: '3',
+        userName: 'Alex Rivera',
+        userAvatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150',
+        text: 'Testing ZegoCloud WebRTC integration in low-latency mode 🎙️✨',
+        bgColor: 'from-purple-600 to-indigo-900',
+        createdAt: new Date(now - 5 * 3600 * 1000).toISOString(),
+        expiresAt: new Date(now + 19 * 3600 * 1000).toISOString(),
+        viewsCount: 8
+      }
+    ];
+    try {
+      localStorage.setItem('snns_user_statuses', JSON.stringify(demoStatuses));
+    } catch (e) {}
+    return demoStatuses;
+  }
+
+  async fetchActiveStatuses(): Promise<UserStatus[]> {
+    let statuses = this.getLocalStatuses();
+
+    if (isSupabaseConfigured) {
+      try {
+        const { data, error } = await supabase
+          .from('user_statuses')
+          .select('*')
+          .gt('expires_at', new Date().toISOString())
+          .order('created_at', { ascending: false });
+
+        if (!error && data && data.length > 0) {
+          const dbStatuses: UserStatus[] = data.map(d => ({
+            id: d.id,
+            userId: d.user_id,
+            userName: d.user_name || 'User',
+            userAvatar: d.user_avatar || '',
+            text: d.text || '',
+            bgColor: d.bg_color || 'from-cyan-600 to-slate-900',
+            mediaUrl: d.media_url,
+            createdAt: d.created_at,
+            expiresAt: d.expires_at,
+            viewsCount: d.views_count || 0
+          }));
+          // Merge with local statuses by unique ID
+          const statusMap = new Map<string, UserStatus>();
+          statuses.forEach(s => statusMap.set(s.id, s));
+          dbStatuses.forEach(s => statusMap.set(s.id, s));
+          statuses = Array.from(statusMap.values());
+        }
+      } catch (err) {
+        console.warn('Using local fallback for statuses:', err);
+      }
+    }
+
+    // Sort newest first
+    return statuses.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  }
+
+  async createStatus(params: {
+    userId: string;
+    userName: string;
+    userAvatar: string;
+    text: string;
+    bgColor?: string;
+    mediaUrl?: string;
+  }): Promise<UserStatus> {
+    const now = new Date();
+    const expires = new Date(now.getTime() + 24 * 60 * 60 * 1000); // 24 hours
+
+    const newStatus: UserStatus = {
+      id: `status-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
+      userId: params.userId,
+      userName: params.userName,
+      userAvatar: params.userAvatar,
+      text: params.text,
+      bgColor: params.bgColor || 'from-cyan-600 to-slate-900',
+      mediaUrl: params.mediaUrl,
+      createdAt: now.toISOString(),
+      expiresAt: expires.toISOString(),
+      viewsCount: 0
+    };
+
+    // Save locally
+    const existing = this.getLocalStatuses();
+    const updated = [newStatus, ...existing];
+    try {
+      localStorage.setItem('snns_user_statuses', JSON.stringify(updated));
+    } catch (e) {}
+
+    // Save to Supabase if configured
+    if (isSupabaseConfigured) {
+      try {
+        await supabase.from('user_statuses').insert({
+          id: newStatus.id,
+          user_id: newStatus.userId,
+          user_name: newStatus.userName,
+          user_avatar: newStatus.userAvatar,
+          text: newStatus.text,
+          bg_color: newStatus.bgColor,
+          media_url: newStatus.mediaUrl,
+          created_at: newStatus.createdAt,
+          expires_at: newStatus.expiresAt
+        });
+      } catch (err) {
+        console.warn('Failed to insert status to Supabase, saved locally:', err);
+      }
+    }
+
+    return newStatus;
+  }
+
+  async uploadStatusImage(file: File): Promise<string> {
+    if (isSupabaseConfigured) {
+      try {
+        const ext = file.name.split('.').pop() || 'jpg';
+        const fileName = `status_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.${ext}`;
+        
+        // Attempt upload to Supabase Storage bucket 'status-media' or 'attachments'
+        const { data, error } = await supabase.storage
+          .from('status-media')
+          .upload(fileName, file, {
+            cacheControl: '3600',
+            upsert: true
+          });
+
+        if (!error && data) {
+          const { data: publicUrlData } = supabase.storage
+            .from('status-media')
+            .getPublicUrl(data.path);
+          if (publicUrlData?.publicUrl) {
+            return publicUrlData.publicUrl;
+          }
+        } else {
+          // If 'status-media' bucket doesn't exist, try 'attachments' bucket
+          const { data: attData, error: attError } = await supabase.storage
+            .from('attachments')
+            .upload(fileName, file, { upsert: true });
+
+          if (!attError && attData) {
+            const { data: attPublicUrlData } = supabase.storage
+              .from('attachments')
+              .getPublicUrl(attData.path);
+            if (attPublicUrlData?.publicUrl) {
+              return attPublicUrlData.publicUrl;
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('Supabase storage status upload failed, falling back to DataURL:', err);
+      }
+    }
+
+    // Fallback to FileReader DataURL for local mode or if storage bucket is unavailable
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = (e) => reject(e);
+      reader.readAsDataURL(file);
+    });
+  }
+
+  async deleteStatus(statusId: string): Promise<void> {
+    const existing = this.getLocalStatuses();
+    const filtered = existing.filter(s => s.id !== statusId);
+    try {
+      localStorage.setItem('snns_user_statuses', JSON.stringify(filtered));
+    } catch (e) {}
+
+    if (isSupabaseConfigured) {
+      try {
+        await supabase.from('user_statuses').delete().eq('id', statusId);
+      } catch (err) {
+        console.warn('Failed to delete status in Supabase:', err);
+      }
     }
   }
 }

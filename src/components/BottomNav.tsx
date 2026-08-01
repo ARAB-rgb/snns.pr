@@ -1,21 +1,23 @@
 import React from 'react';
-import { MessageSquare, Phone, Users, Settings } from 'lucide-react';
+import { MessageSquare, Phone, Users, Settings, CircleDot } from 'lucide-react';
 import { useLanguage } from '../i18n/LanguageContext';
 
-export type TabType = 'chats' | 'calls' | 'contacts' | 'settings';
+export type TabType = 'chats' | 'status' | 'calls' | 'contacts' | 'settings';
 
 interface BottomNavProps {
   activeTab: TabType;
   setActiveTab: (tab: TabType) => void;
   unreadCount?: number;
   missedCallCount?: number;
+  hasNewStatus?: boolean;
 }
 
 export const BottomNav: React.FC<BottomNavProps> = ({
   activeTab,
   setActiveTab,
   unreadCount = 0,
-  missedCallCount = 0
+  missedCallCount = 0,
+  hasNewStatus = false
 }) => {
   const { t } = useLanguage();
 
@@ -25,6 +27,12 @@ export const BottomNav: React.FC<BottomNavProps> = ({
       label: t('chats'),
       icon: MessageSquare,
       badge: unreadCount > 0 ? unreadCount : null
+    },
+    {
+      id: 'status' as TabType,
+      label: t('status'),
+      icon: CircleDot,
+      hasDot: hasNewStatus
     },
     {
       id: 'calls' as TabType,
@@ -73,6 +81,9 @@ export const BottomNav: React.FC<BottomNavProps> = ({
                 <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.2 rounded-full border border-slate-950 animate-bounce">
                   {item.badge}
                 </span>
+              )}
+              {item.hasDot && !item.badge && (
+                <span className="absolute -top-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-cyan-400 border border-slate-950 animate-pulse" />
               )}
             </div>
 

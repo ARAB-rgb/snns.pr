@@ -90,3 +90,16 @@ export interface FirebaseConfigState {
   appId: string;
   isInitialized: boolean;
 }
+
+export interface UserStatus {
+  id: string;
+  userId: string;
+  userName: string;
+  userAvatar: string;
+  text: string;
+  bgColor?: string;
+  mediaUrl?: string;
+  createdAt: string;
+  expiresAt: string;
+  viewsCount?: number;
+}

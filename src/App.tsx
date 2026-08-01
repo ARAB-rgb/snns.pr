@@ -10,6 +10,7 @@ import { CallScreen } from './components/CallScreen';
 import { IncomingCallOverlay } from './components/IncomingCallOverlay';
 import { ContactsList } from './components/ContactsList';
 import { SettingsScreen } from './components/SettingsScreen';
+import { StatusTab } from './components/StatusTab';
 import { AuthModal } from './components/AuthModal';
 import { NewChatModal } from './components/NewChatModal';
 import { PrivacyModal } from './components/PrivacyModal';
@@ -400,6 +401,10 @@ function AppContent() {
                   onStartCall={startCall}
                   onNewChat={() => setShowNewChatModal(true)}
                 />
+              )}
+
+              {activeTab === 'status' && (
+                <StatusTab currentUser={currentUser} />
               )}
 
               {activeTab === 'calls' && (
