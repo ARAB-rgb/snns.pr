@@ -3,7 +3,7 @@ import { Globe, Shield, Sparkles, Check, RefreshCw, LogOut, Lock, Users, UserChe
 import { useLanguage } from '../i18n/LanguageContext';
 import { SUPPORTED_LANGUAGES, LanguageCode } from '../types/i18n';
 import { User } from '../types';
-import { firebaseAuth } from '../services/firebaseAuth';
+import { supabaseAuth } from '../services/supabaseAuth';
 import { sounds } from '../services/audioSynthesizer';
 
 interface SettingsScreenProps {
@@ -179,7 +179,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
         </p>
 
         <button
-          onClick={() => firebaseAuth.logout()}
+          onClick={() => supabaseAuth.logout()}
           className="w-full py-2.5 rounded-2xl bg-red-600/20 hover:bg-red-600/30 text-red-300 border border-red-500/30 text-xs font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer"
         >
           <LogOut className="w-4 h-4" />

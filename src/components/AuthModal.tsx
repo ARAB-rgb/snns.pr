@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Shield, LogOut, AlertTriangle } from 'lucide-react';
 import { User } from '../types';
 import { useLanguage } from '../i18n/LanguageContext';
-import { firebaseAuth } from '../services/firebaseAuth';
+import { supabaseAuth } from '../services/supabaseAuth';
 import { SUPPORTED_LANGUAGES } from '../types/i18n';
 
 interface AuthModalProps {
@@ -18,18 +18,18 @@ export const AuthModal: React.FC<AuthModalProps> = ({ currentUser, onClose }) =>
   const handleGoogleSignIn = async () => {
     setLoading(true);
     setAuthError(null);
-    const result = await firebaseAuth.signInWithGoogle();
+    const result = await supabaseAuth.signInWithGoogle();
     setLoading(false);
 
-    if (result.user) {
-      if (onClose) onClose();
-    } else if (result.error) {
+    if (result.error) {
       setAuthError(result.error);
+    } else if (onClose) {
+      onClose();
     }
   };
 
   const handleLogout = async () => {
-    await firebaseAuth.logout();
+    await supabaseAuth.logout();
     if (onClose) onClose();
   };
 
@@ -40,7 +40,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ currentUser, onClose }) =>
         <div className="flex items-center justify-between pb-3 border-b border-slate-800">
           <div className="flex items-center gap-2">
             <Shield className="w-5 h-5 text-cyan-400" />
-            <h2 className="text-sm font-bold text-white">{t('firebaseAuth')}</h2>
+            <h2 className="text-sm font-bold text-white">تسجيل الدخول عبر Supabase</h2>
           </div>
         </div>
 

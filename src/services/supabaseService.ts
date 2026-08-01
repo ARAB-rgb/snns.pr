@@ -1,7 +1,57 @@
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { User, Message, CallLog, PrivacySettings } from '../types';
 
+export function toUuidOrText(uid: string): string {
+  if (!uid) return '00000000-0000-0000-0000-000000000000';
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if (uuidRegex.test(uid)) return uid;
+
+  let hex = '';
+  for (let i = 0; i < uid.length; i++) {
+    hex += uid.charCodeAt(i).toString(16);
+  }
+  hex = (hex + '00000000000000000000000000000000').slice(0, 32);
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(12, 15)}-a${hex.slice(15, 18)}-${hex.slice(18, 30)}`;
+}
+
 export class SupabaseService {
+  // Sync user profile from Supabase Auth user directly into public.profiles
+  async syncUserProfileFromAuth(sbUser: any): Promise<void> {
+    if (!isSupabaseConfigured || !sbUser) return;
+    try {
+      const metadata = sbUser.user_metadata || {};
+      const fullName = metadata.full_name || metadata.name || sbUser.email?.split('@')[0] || 'مستخدم';
+      const avatarUrl =
+        metadata.avatar_url ||
+        metadata.picture ||
+        'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150';
+
+      const now = new Date().toISOString();
+
+      const payload: Record<string, any> = {
+        id: sbUser.id,
+        user_id: sbUser.id,
+        full_name: fullName,
+        name: fullName,
+        email: sbUser.email || '',
+        avatar_url: avatarUrl,
+        avatar: avatarUrl,
+        language: 'ar',
+        profile_visibility: 'public',
+        is_online: true,
+        last_seen: now,
+        updated_at: now
+      };
+
+      const { error } = await supabase.from('profiles').upsert(payload, { onConflict: 'id' });
+      if (error) {
+        console.info('syncUserProfileFromAuth notice:', error.message || error);
+      }
+    } catch (err) {
+      console.info('syncUserProfileFromAuth exception:', err);
+    }
+  }
+
   // Helper for localStorage state fallback
   private getLocalFollows(userId: string): string[] {
     try {
@@ -133,11 +183,18 @@ export class SupabaseService {
   }
 
   // Sync user profile in Supabase 'profiles' table with error resilience and fallbacks
-  async syncUserProfile(user: User): Promise<void> {
+  async syncUserProfile(user: User, idToken?: string): Promise<void> {
     if (!isSupabaseConfigured) return;
     try {
+      if (idToken && (supabase as any).rest) {
+        (supabase as any).rest.headers['Authorization'] = `Bearer ${idToken}`;
+      }
+
+      const formattedUuid = toUuidOrText(user.id);
+
       const payload: Record<string, any> = {
-        id: user.id,
+        id: formattedUuid,
+        user_id: user.id,
         name: user.name,
         email: user.email || '',
         avatar: user.avatar || '',
@@ -148,21 +205,22 @@ export class SupabaseService {
         updated_at: new Date().toISOString()
       };
 
-      // 1. Attempt upsert
+      // 1. Attempt upsert with UUID
       const { error } = await supabase.from('profiles').upsert(payload, { onConflict: 'id' });
       if (error) {
-        // 2. Fallback: try update first
-        const { error: updateErr } = await supabase.from('profiles').update(payload).eq('id', user.id);
-        if (updateErr) {
-          // 3. Fallback: try insert
-          const { error: insertErr } = await supabase.from('profiles').insert([payload]);
-          if (insertErr) {
-            console.info('Supabase profiles sync handled gracefully:', insertErr.message || insertErr);
+        // 2. Fallback: try raw string id if profiles.id is text
+        const rawPayload = { ...payload, id: user.id };
+        const { error: rawErr } = await supabase.from('profiles').upsert(rawPayload, { onConflict: 'id' });
+        if (rawErr) {
+          // 3. Fallback: update by user_id or id
+          const { error: updateErr } = await supabase.from('profiles').update(payload).eq('user_id', user.id);
+          if (updateErr) {
+            console.info('Supabase profiles sync note:', updateErr.message || updateErr);
           }
         }
       }
     } catch (err) {
-      console.info('syncUserProfile non-blocking notice:', err);
+      console.info('syncUserProfile notice:', err);
     }
   }
 
@@ -170,11 +228,12 @@ export class SupabaseService {
   async setUserPresence(userId: string, isOnline: boolean): Promise<void> {
     if (!isSupabaseConfigured) return;
     try {
+      const formattedUuid = toUuidOrText(userId);
       await supabase.from('profiles').update({
         is_online: isOnline,
         last_seen: new Date().toISOString(),
         updated_at: new Date().toISOString()
-      }).eq('id', userId);
+      }).or(`id.eq.${formattedUuid},id.eq.${userId},user_id.eq.${userId}`);
     } catch (err) {
       console.warn('Failed to update presence in Supabase:', err);
     }
@@ -187,57 +246,73 @@ export class SupabaseService {
       return () => {};
     }
 
+    const currentUuid = toUuidOrText(currentUserId);
+
     const fetchUsers = async () => {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .neq('id', currentUserId);
+      try {
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('*');
 
-      if (!error && data) {
-        const myFollowing = this.getLocalFollows(currentUserId);
-        const myPrivacy = this.getLocalPrivacy(currentUserId);
+        if (!error && data) {
+          const myFollowing = this.getLocalFollows(currentUserId);
+          const myPrivacy = this.getLocalPrivacy(currentUserId);
 
-        const userList: User[] = data.map((p: any) => {
-          const userFollowers = this.getLocalFollowers(p.id);
-          const isFollowed = myFollowing.includes(p.id);
-          const userPrivacy = this.getLocalPrivacy(p.id);
+          // Exclude current user by checking raw id, user_id, and formatted UUID
+          const otherProfiles = data.filter(
+            (p: any) =>
+              p.id !== currentUserId &&
+              p.id !== currentUuid &&
+              p.user_id !== currentUserId
+          );
 
-          // Respect privacy setting for online status
-          let isOnline = p.is_online ?? false;
-          if (userPrivacy.hideOnlineStatus) {
-            isOnline = false;
-          }
+          const userList: User[] = otherProfiles.map((p: any) => {
+            const profileUserId = p.user_id || p.id;
+            const userFollowers = this.getLocalFollowers(profileUserId);
+            const isFollowed = myFollowing.includes(profileUserId);
+            const userPrivacy = this.getLocalPrivacy(profileUserId);
 
-          let lastSeenText = p.last_seen
-            ? new Date(p.last_seen).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-            : 'غير متصل';
+            // Respect privacy setting for online status
+            let isOnline = p.is_online ?? false;
+            if (userPrivacy.hideOnlineStatus) {
+              isOnline = false;
+            }
 
-          if (userPrivacy.lastSeenVisibility === 'nobody') {
-            lastSeenText = 'مخفي';
-          } else if (userPrivacy.lastSeenVisibility === 'followers' && !isFollowed) {
-            lastSeenText = 'للمتابعين فقط';
-          }
+            let lastSeenText = p.last_seen
+              ? new Date(p.last_seen).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+              : 'غير متصل';
 
-          return {
-            id: p.id,
-            name: p.name || p.email?.split('@')[0] || 'مستخدم',
-            avatar: p.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
-            email: p.email,
-            phone: p.phone,
-            language: p.language || 'ar',
-            isOnline,
-            lastSeen: lastSeenText,
-            statusText: isOnline ? 'متصل الآن' : lastSeenText,
-            followersCount: userFollowers.length,
-            followingCount: this.getLocalFollows(p.id).length,
-            isFollowedByMe: isFollowed,
-            privacySettings: userPrivacy
-          };
-        });
+            if (userPrivacy.lastSeenVisibility === 'nobody') {
+              lastSeenText = 'مخفي';
+            } else if (userPrivacy.lastSeenVisibility === 'followers' && !isFollowed) {
+              lastSeenText = 'للمتابعين فقط';
+            }
 
-        // Filter out blocked users
-        const filteredList = userList.filter((u) => !myPrivacy.blockedUserIds.includes(u.id));
-        callback(filteredList);
+            return {
+              id: profileUserId,
+              name: p.full_name || p.name || p.email?.split('@')[0] || 'مستخدم',
+              avatar: p.avatar_url || p.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
+              email: p.email,
+              phone: p.phone,
+              language: p.language || 'ar',
+              isOnline,
+              lastSeen: lastSeenText,
+              statusText: isOnline ? 'متصل الآن' : lastSeenText,
+              followersCount: userFollowers.length,
+              followingCount: this.getLocalFollows(profileUserId).length,
+              isFollowedByMe: isFollowed,
+              privacySettings: userPrivacy
+            };
+          });
+
+          // Filter out blocked users
+          const filteredList = userList.filter((u) => !myPrivacy.blockedUserIds.includes(u.id));
+          callback(filteredList);
+        } else if (error) {
+          console.info('Supabase profiles fetch note:', error.message || error);
+        }
+      } catch (err) {
+        console.warn('Error in fetchUsers:', err);
       }
     };
 
