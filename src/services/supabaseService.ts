@@ -487,7 +487,13 @@ export class SupabaseService {
         { event: '*', schema: 'public', table: 'messages' },
         () => fetchConversations()
       )
-      .subscribe();
+      .subscribe((status, err) => {
+        if (status === 'SUBSCRIBED') {
+          console.log(`📡 [Realtime] Conversations channel active for user ${currentUserId}`);
+        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          console.warn(`⚠️ [Realtime] Conversations subscription notice (${status}):`, err || 'Connecting...');
+        }
+      });
 
     const interval = setInterval(fetchConversations, 4000);
 
@@ -514,7 +520,9 @@ export class SupabaseService {
         .eq('conversation_id', conversationId)
         .order('created_at', { ascending: true });
 
-      if (!error && data) {
+      if (error) {
+        console.error('❌ [subscribeMessages] Error fetching messages:', error);
+      } else if (data) {
         const msgList: Message[] = data.map((m: any) => {
           const dateObj = m.created_at ? new Date(m.created_at) : new Date();
           return {
@@ -549,7 +557,13 @@ export class SupabaseService {
           }
         }
       )
-      .subscribe();
+      .subscribe((status, err) => {
+        if (status === 'SUBSCRIBED') {
+          console.log(`📡 [Realtime] Messages channel active for conv ${conversationId}`);
+        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          console.warn(`⚠️ [Realtime] Messages subscription notice (${status}):`, err || 'Connecting...');
+        }
+      });
 
     const interval = setInterval(fetchMessages, 3000);
 
@@ -569,30 +583,66 @@ export class SupabaseService {
     fileName?: string,
     replyTo?: { id: string; text: string; senderName?: string }
   ): Promise<void> {
-    if (!isSupabaseConfigured) return;
+    if (!isSupabaseConfigured) {
+      console.warn('⚠️ [sendMessage] Supabase client is not configured.');
+      return;
+    }
 
-    const convId = await this.ensureConversation(senderId, receiverId);
-    const lastMsgText = type === 'image' ? '📷 صورة' : type === 'audio' ? '🎤 تسجيل صوتي' : type === 'file' ? '📁 ملف' : text;
-
-    await supabase.from('messages').insert({
-      conversation_id: convId,
-      sender_id: senderId,
-      receiver_id: receiverId,
-      text,
+    console.log('📤 [sendMessage] Dispatching message...', {
+      senderId,
+      receiverId,
       type,
-      media_url: mediaUrl || null,
-      file_name: fileName || null,
-      reply_to: replyTo || null,
-      is_read: false,
-      is_delivered: true
+      textPreview: text?.slice(0, 30),
+      hasMedia: !!mediaUrl,
+      fileName
     });
 
-    await supabase.from('conversations').update({
-      last_message: lastMsgText,
-      last_sender_id: senderId,
-      last_message_time: new Date().toISOString(),
-      updated_at: new Date().toISOString()
-    }).eq('id', convId);
+    try {
+      const convId = await this.ensureConversation(senderId, receiverId);
+      console.log('📂 [sendMessage] Conversation ID ensured:', convId);
+
+      const lastMsgText = type === 'image' ? '📷 صورة' : type === 'audio' ? '🎤 تسجيل صوتي' : type === 'file' ? '📁 ملف' : text;
+
+      const { data, error: msgError } = await supabase.from('messages').insert({
+        conversation_id: convId,
+        sender_id: senderId,
+        receiver_id: receiverId,
+        text,
+        type,
+        media_url: mediaUrl || null,
+        file_name: fileName || null,
+        reply_to: replyTo || null,
+        is_read: false,
+        is_delivered: true
+      }).select().single();
+
+      if (msgError) {
+        console.error('❌ [sendMessage] Message insert error:', {
+          code: msgError.code,
+          message: msgError.message,
+          details: msgError.details,
+          hint: msgError.hint
+        });
+      } else {
+        console.log('✅ [sendMessage] Message successfully saved to Supabase:', data?.id);
+      }
+
+      const { error: convError } = await supabase.from('conversations').update({
+        last_message: lastMsgText,
+        last_sender_id: senderId,
+        last_message_time: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      }).eq('id', convId);
+
+      if (convError) {
+        console.error('⚠️ [sendMessage] Conversation update notice:', {
+          code: convError.code,
+          message: convError.message
+        });
+      }
+    } catch (err) {
+      console.error('💥 [sendMessage] Exception sending message:', err);
+    }
   }
 
   // Delete message
@@ -669,7 +719,12 @@ export class SupabaseService {
     type: 'audio' | 'video';
     status: 'ringing' | 'accepted' | 'rejected' | 'missed' | 'ended';
   }): Promise<string | null> {
-    if (!isSupabaseConfigured) return null;
+    if (!isSupabaseConfigured) {
+      console.warn('⚠️ [createCallRecord] Supabase client is not configured.');
+      return null;
+    }
+
+    console.log('📞 [createCallRecord] Dispatching call record...', params);
 
     try {
       const channelId = `zego_call_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
@@ -690,13 +745,20 @@ export class SupabaseService {
       const { data, error } = await supabase.from('calls').upsert(payload).select('id').single();
 
       if (error) {
-        console.info('createCallRecord note:', error.message || error);
+        console.error('❌ [createCallRecord] Supabase error upserting call:', {
+          code: error.code,
+          message: error.message,
+          details: error.details,
+          hint: error.hint
+        });
         return params.id || null;
       }
 
-      return data?.id || params.id || null;
+      const createdId = data?.id || params.id || null;
+      console.log('✅ [createCallRecord] Call record saved successfully:', createdId);
+      return createdId;
     } catch (err) {
-      console.warn('createCallRecord notice:', err);
+      console.error('💥 [createCallRecord] Exception creating call record:', err);
       return params.id || null;
     }
   }
@@ -726,7 +788,7 @@ export class SupabaseService {
     }
 
     const checkIncoming = async () => {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('calls')
         .select('*')
         .eq('receiver_id', currentUserId)
@@ -734,8 +796,11 @@ export class SupabaseService {
         .order('started_at', { ascending: false })
         .limit(1);
 
-      if (data && data.length > 0) {
+      if (error) {
+        console.error('❌ [subscribeIncomingCalls] Query error:', error);
+      } else if (data && data.length > 0) {
         const c = data[0];
+        console.log('🔔 [subscribeIncomingCalls] Incoming call detected:', c.id);
         callback({
           callId: c.id,
           callerId: c.caller_id,
@@ -756,10 +821,64 @@ export class SupabaseService {
         { event: '*', schema: 'public', table: 'calls', filter: `receiver_id=eq.${currentUserId}` },
         () => checkIncoming()
       )
-      .subscribe();
+      .subscribe((status, err) => {
+        if (status === 'SUBSCRIBED') {
+          console.log(`📡 [Realtime] Incoming calls channel active for user ${currentUserId}`);
+        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          console.warn(`⚠️ [Realtime] Incoming calls subscription notice (${status}):`, err || 'Connecting...');
+        }
+      });
 
     return () => {
       supabase.removeChannel(channel);
+    };
+  }
+
+  // Subscribe to specific Call Status updates
+  subscribeCallStatus(callId: string, callback: (status: string) => void): () => void {
+    if (!isSupabaseConfigured || !callId) return () => {};
+
+    const checkStatus = async () => {
+      const { data, error } = await supabase
+        .from('calls')
+        .select('status')
+        .eq('id', callId)
+        .single();
+
+      if (error) {
+        console.error('❌ [subscribeCallStatus] Fetch error:', error);
+      } else if (data?.status) {
+        callback(data.status);
+      }
+    };
+
+    checkStatus();
+
+    const channel = supabase
+      .channel(`call_status_${callId}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'calls', filter: `id=eq.${callId}` },
+        (payload: any) => {
+          if (payload.new?.status) {
+            console.log(`📞 [subscribeCallStatus] Status changed for call ${callId}:`, payload.new.status);
+            callback(payload.new.status);
+          }
+        }
+      )
+      .subscribe((status, err) => {
+        if (status === 'SUBSCRIBED') {
+          console.log(`📡 [Realtime] Call status channel active for call ${callId}`);
+        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          console.warn(`⚠️ [Realtime] Call status subscription notice (${status}):`, err || 'Connecting...');
+        }
+      });
+
+    const interval = setInterval(checkStatus, 2000);
+
+    return () => {
+      supabase.removeChannel(channel);
+      clearInterval(interval);
     };
   }
 

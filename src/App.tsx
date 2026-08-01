@@ -34,7 +34,7 @@ function AppContent() {
 
   const [activeCall, setActiveCall] = useState<ActiveCallState | null>(null);
   const [incomingCall, setIncomingCall] = useState<{ callId: string; caller: User; type: 'audio' | 'video' } | null>(null);
-  const [outgoingCall, setOutgoingCall] = useState<{ callee: User; type: 'audio' | 'video' } | null>(null);
+  const [outgoingCall, setOutgoingCall] = useState<{ callId: string; callee: User; type: 'audio' | 'video' } | null>(null);
 
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [showNewChatModal, setShowNewChatModal] = useState(false);
@@ -175,29 +175,72 @@ function AppContent() {
     return () => unsub();
   }, [currentUser, selectedUser]);
 
-  // Start outgoing call using Zego Call Invitation
+  // Listen for outgoing call acceptance or rejection
+  useEffect(() => {
+    if (!outgoingCall || !outgoingCall.callId || !currentUser) return;
+
+    const unsub = supabaseService.subscribeCallStatus(outgoingCall.callId, (status) => {
+      if (status === 'accepted') {
+        const roomId = `room_${currentUser.id}_${outgoingCall.callee.id}`;
+        setActiveCall({
+          id: outgoingCall.callId,
+          roomId,
+          participant: outgoingCall.callee,
+          type: outgoingCall.type,
+          status: 'connected',
+          isMuted: false,
+          isVideoOff: false,
+          isSpeakerOn: true,
+          isScreenSharing: false,
+          isFrontCamera: true,
+          durationSeconds: 0,
+          hasLocalVideo: true,
+          hasRemoteVideo: true,
+          signalQuality: 'excellent'
+        });
+        setOutgoingCall(null);
+      } else if (status === 'rejected' || status === 'ended' || status === 'missed') {
+        sounds.playHangupTone();
+        setOutgoingCall(null);
+      }
+    });
+
+    return () => unsub();
+  }, [outgoingCall, currentUser]);
+
+  // Start outgoing call using Zego Call Invitation and Supabase Realtime
   const startCall = async (participant: User, type: 'audio' | 'video') => {
     if (!currentUser) return;
 
-    // Show outgoing call screen with ringing state
-    setOutgoingCall({ callee: participant, type });
+    // 1. Create call row in Supabase
+    const callId = await supabaseService.createCallRecord({
+      caller_id: currentUser.id,
+      receiver_id: participant.id,
+      type,
+      status: 'ringing'
+    });
+
+    const activeCallId = callId || `call_${Date.now()}`;
+
+    // 2. Show outgoing ringing overlay
+    setOutgoingCall({ callId: activeCallId, callee: participant, type });
 
     console.log('📱 [CallInitiated] Sending Zego Invitation to target:', {
+      callId: activeCallId,
       targetId: participant.id,
       targetName: participant.name,
       type
     });
 
-    const res = await zegoCallService.sendCallInvitation(participant, type);
-
-    if (!res.success) {
-      alert(res.error || 'فشل الاتصال بالمستخدم. يرجى التأكد من أن المستخدم الآخر متصل بالنظام.');
-      setOutgoingCall(null);
-    }
+    // 3. Trigger Zego invitation in background
+    zegoCallService.sendCallInvitation(participant, type);
   };
 
   // Cancel outgoing call
-  const cancelOutgoingCall = () => {
+  const cancelOutgoingCall = async () => {
+    if (outgoingCall?.callId) {
+      await supabaseService.updateCallStatus(outgoingCall.callId, 'rejected');
+    }
     setOutgoingCall(null);
   };
 
