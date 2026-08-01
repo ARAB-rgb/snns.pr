@@ -40,6 +40,12 @@ function AppContent() {
   const [showNewChatModal, setShowNewChatModal] = useState(false);
   const [showPrivacyModal, setShowPrivacyModal] = useState(false);
 
+  const usersRef = React.useRef<User[]>([]);
+  usersRef.current = users;
+
+  const outgoingCallRef = React.useRef<{ callId: string; callee: User; type: 'audio' | 'video' } | null>(null);
+  outgoingCallRef.current = outgoingCall;
+
   const refreshUsers = () => {
     if (!currentUser) return;
     supabaseService.subscribeUsers(currentUser.id, (userList) => {
@@ -47,7 +53,7 @@ function AppContent() {
     });
   };
 
-  // Subscribe to Supabase Auth User Changes & Init Zego
+  // Subscribe to Supabase Auth User Changes
   useEffect(() => {
     const unsubscribe = supabaseAuth.onUserChange((user) => {
       setCurrentUser(user);
@@ -63,7 +69,7 @@ function AppContent() {
 
     zegoCallService.registerListeners({
       onIncomingCall: ({ callID, caller, callType }) => {
-        const callerObj = users.find((u) => u.id === caller.userID) || {
+        const callerObj = usersRef.current.find((u) => u.id === caller.userID) || {
           id: caller.userID,
           name: caller.userName || 'متصل جديد',
           avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
@@ -77,13 +83,14 @@ function AppContent() {
         });
       },
       onCallAccepted: () => {
-        if (outgoingCall) {
-          const roomId = `room_${currentUser.id}_${outgoingCall.callee.id}`;
+        const currentOutgoing = outgoingCallRef.current;
+        if (currentOutgoing) {
+          const roomId = `room_${currentUser.id}_${currentOutgoing.callee.id}`;
           setActiveCall({
             id: `call_${Date.now()}`,
             roomId,
-            participant: outgoingCall.callee,
-            type: outgoingCall.type,
+            participant: currentOutgoing.callee,
+            type: currentOutgoing.type,
             status: 'connected',
             isMuted: false,
             isVideoOff: false,
@@ -104,7 +111,7 @@ function AppContent() {
         setActiveCall(null);
       }
     });
-  }, [currentUser, users, outgoingCall]);
+  }, [currentUser?.id]);
 
   // Subscribe to Real Supabase Profiles
   useEffect(() => {
@@ -112,11 +119,11 @@ function AppContent() {
       setUsers([]);
       return;
     }
-    const unsub = supabaseService.subscribeUsers(currentUser.id, (userList) => {
+    const unsubUsers = supabaseService.subscribeUsers(currentUser.id, (userList) => {
       setUsers(userList);
     });
-    return () => unsub();
-  }, [currentUser]);
+    return () => unsubUsers();
+  }, [currentUser?.id]);
 
   // Subscribe to Real Conversations for current user
   useEffect(() => {
@@ -128,7 +135,7 @@ function AppContent() {
       setConversations(convs);
     });
     return () => unsub();
-  }, [currentUser]);
+  }, [currentUser?.id]);
 
   // Subscribe to Real Supabase Call Logs
   useEffect(() => {
@@ -140,14 +147,15 @@ function AppContent() {
       setCallLogs(logs);
     });
     return () => unsub();
-  }, [currentUser]);
+  }, [currentUser?.id]);
 
   // Subscribe to Real Incoming Calls
   useEffect(() => {
     if (!currentUser) return;
     const unsub = supabaseService.subscribeIncomingCalls(currentUser.id, (inc) => {
       if (inc) {
-        const callerObj = users.find((u) => u.id === inc.callerId) || {
+        console.log('🔔 [App] Incoming Realtime Call Received:', inc);
+        const callerObj = usersRef.current.find((u) => u.id === inc.callerId) || {
           id: inc.callerId,
           name: 'متصل جديد',
           avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
@@ -155,12 +163,13 @@ function AppContent() {
           isOnline: true
         };
         setIncomingCall({ callId: inc.callId, caller: callerObj, type: inc.type });
+        sounds.startRingtone();
       } else {
         setIncomingCall(null);
       }
     });
     return () => unsub();
-  }, [currentUser, users]);
+  }, [currentUser?.id]);
 
   // Subscribe to Messages when a chat is open
   useEffect(() => {
@@ -173,11 +182,11 @@ function AppContent() {
       }));
     });
     return () => unsub();
-  }, [currentUser, selectedUser]);
+  }, [currentUser?.id, selectedUser?.id]);
 
   // Listen for outgoing call acceptance or rejection
   useEffect(() => {
-    if (!outgoingCall || !outgoingCall.callId || !currentUser) return;
+    if (!outgoingCall?.callId || !currentUser) return;
 
     const unsub = supabaseService.subscribeCallStatus(outgoingCall.callId, (status) => {
       if (status === 'accepted') {
@@ -206,7 +215,7 @@ function AppContent() {
     });
 
     return () => unsub();
-  }, [outgoingCall, currentUser]);
+  }, [outgoingCall?.callId, currentUser?.id]);
 
   // Start outgoing call using Zego Call Invitation and Supabase Realtime
   const startCall = async (participant: User, type: 'audio' | 'video') => {

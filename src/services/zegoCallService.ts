@@ -75,7 +75,7 @@ export class ZegoCallService {
 
       // Configure Call Invitation callbacks
       this.zpInstance.setCallInvitationConfig({
-        enableCustomCallInvitationDialog: false, // Use Zego built-in or custom UI
+        enableCustomCallInvitationDialog: true, // Use custom UI in React, prevent native Zego alert popups
         onIncomingCallReceived: async (callID: string, caller: any, callType: number, callees: any[]) => {
           console.log('🔔 [ZEGO] INCOMING_CALL RECEIVED:', { callID, caller, callType, callees });
           if (this.currentUserId) {
