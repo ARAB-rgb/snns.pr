@@ -90,7 +90,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
         <div className="flex items-center justify-between pb-2 border-b border-slate-700/60">
           <div className="flex items-center gap-2">
             <Activity className="w-4 h-4 text-cyan-400" />
-            <h3 className="text-xs font-bold text-slate-100 uppercase tracking-wider">صفحة التشخيص (Diagnostics)</h3>
+            <h3 className="text-xs font-bold text-slate-100 uppercase tracking-wider">تشخيص الرسائل والمكالمات (Diagnostics)</h3>
           </div>
           <button
             onClick={handleTestDiagnostics}
@@ -101,6 +101,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
           </button>
         </div>
 
+        {/* Message Diagnostics */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
           {/* Auth */}
           <div className="flex items-center justify-between p-2.5 bg-slate-900/60 rounded-2xl border border-slate-700/50">
@@ -136,11 +137,11 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
             </span>
           </div>
 
-          {/* Realtime */}
+          {/* Messages Realtime */}
           <div className="flex items-center justify-between p-2.5 bg-slate-900/60 rounded-2xl border border-slate-700/50">
             <div className="flex items-center gap-2">
               <Radio className="w-3.5 h-3.5 text-amber-400" />
-              <span className="text-slate-300">Realtime</span>
+              <span className="text-slate-300">Messages Realtime</span>
             </div>
             <span
               className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
@@ -173,30 +174,77 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
               {diagInfo.lastInsertStatus}
             </span>
           </div>
+        </div>
 
-          {/* Last received event */}
-          <div className="flex items-center justify-between p-2.5 bg-slate-900/60 rounded-2xl border border-slate-700/50 sm:col-span-2">
-            <div className="flex items-center gap-2">
-              <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
-              <span className="text-slate-300">Last received event</span>
+        {/* Call Diagnostics Section */}
+        <div className="pt-2 border-t border-slate-700/60">
+          <h4 className="text-[11px] font-bold text-cyan-400 mb-2 uppercase tracking-wide">تشخيص المكالمات (Call Diagnostics)</h4>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+            {/* Calls Realtime */}
+            <div className="flex items-center justify-between p-2 bg-slate-900/60 rounded-xl border border-slate-700/50">
+              <span className="text-slate-300">Calls Realtime</span>
+              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                diagInfo.callsRealtimeStatus === 'SUBSCRIBED' ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40' : 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+              }`}>
+                {diagInfo.callsRealtimeStatus}
+              </span>
             </div>
-            <span
-              className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
-                diagInfo.lastReceivedStatus === 'Success'
-                  ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
-                  : 'bg-slate-700/50 text-slate-400 border-slate-600/50'
-              }`}
-            >
-              {diagInfo.lastReceivedStatus}
-            </span>
+
+            {/* Edge Function Token */}
+            <div className="flex items-center justify-between p-2 bg-slate-900/60 rounded-xl border border-slate-700/50">
+              <span className="text-slate-300">Edge Token</span>
+              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                diagInfo.edgeFunctionTokenStatus === 'Success' ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40' : diagInfo.edgeFunctionTokenStatus === 'Failed' ? 'bg-red-500/20 text-red-300 border-red-500/40' : 'bg-slate-700/50 text-slate-400 border-slate-600/50'
+              }`}>
+                {diagInfo.edgeFunctionTokenStatus}
+              </span>
+            </div>
+
+            {/* ZEGOCLOUD SDK */}
+            <div className="flex items-center justify-between p-2 bg-slate-900/60 rounded-xl border border-slate-700/50">
+              <span className="text-slate-300">ZEGOCLOUD SDK</span>
+              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                diagInfo.zegoSdkStatus === 'Ready' ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40' : 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+              }`}>
+                {diagInfo.zegoSdkStatus}
+              </span>
+            </div>
+
+            {/* Call Status */}
+            <div className="flex items-center justify-between p-2 bg-slate-900/60 rounded-xl border border-slate-700/50">
+              <span className="text-slate-300">Call Status</span>
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/40">
+                {diagInfo.callStatus}
+              </span>
+            </div>
+
+            {/* Camera Permission */}
+            <div className="flex items-center justify-between p-2 bg-slate-900/60 rounded-xl border border-slate-700/50">
+              <span className="text-slate-300">Camera Perm</span>
+              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                diagInfo.cameraPermission === 'Granted' ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40' : diagInfo.cameraPermission === 'Denied' ? 'bg-red-500/20 text-red-300 border-red-500/40' : 'bg-slate-700/50 text-slate-400 border-slate-600/50'
+              }`}>
+                {diagInfo.cameraPermission}
+              </span>
+            </div>
+
+            {/* Microphone Permission */}
+            <div className="flex items-center justify-between p-2 bg-slate-900/60 rounded-xl border border-slate-700/50">
+              <span className="text-slate-300">Microphone Perm</span>
+              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                diagInfo.microphonePermission === 'Granted' ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40' : diagInfo.microphonePermission === 'Denied' ? 'bg-red-500/20 text-red-300 border-red-500/40' : 'bg-slate-700/50 text-slate-400 border-slate-600/50'
+              }`}>
+                {diagInfo.microphonePermission}
+              </span>
+            </div>
           </div>
         </div>
 
-        {diagInfo.lastConversationId && (
+        {diagInfo.currentCallId && (
           <div className="p-2.5 bg-slate-950/80 rounded-2xl border border-slate-800 text-[10px] font-mono space-y-1 text-slate-400">
-            <div><span className="text-cyan-400">conversation_id:</span> {diagInfo.lastConversationId}</div>
-            {diagInfo.lastSenderId && <div><span className="text-teal-400">sender_id:</span> {diagInfo.lastSenderId}</div>}
-            {diagInfo.lastReceiverId && <div><span className="text-indigo-400">receiver_id:</span> {diagInfo.lastReceiverId}</div>}
+            <div><span className="text-cyan-400">call_id:</span> {diagInfo.currentCallId}</div>
+            {diagInfo.currentRoomId && <div><span className="text-teal-400">room_id:</span> {diagInfo.currentRoomId}</div>}
+            {diagInfo.lastCallError && <div className="text-red-400"><span>Error:</span> {diagInfo.lastCallError}</div>}
           </div>
         )}
       </div>

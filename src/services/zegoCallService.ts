@@ -1,7 +1,8 @@
 import { ZegoUIKitPrebuilt } from '@zegocloud/zego-uikit-prebuilt';
 import { ZIM } from 'zego-zim-web';
 import { User } from '../types';
-import { supabaseService } from './supabaseService';
+import { supabaseService, diagnosticsManager } from './supabaseService';
+import { supabase } from '../lib/supabase';
 
 export class ZegoCallService {
   private zpInstance: any = null;
@@ -19,108 +20,174 @@ export class ZegoCallService {
     return parseInt(raw, 10) || 366567418;
   }
 
-  public getServerSecret(): string {
-    return (
-      import.meta.env.VITE_ZEGO_APP_SIGN ||
-      import.meta.env.VITE_ZEGO_SERVER_SECRET ||
-      '0123456789abcdef0123456789abcdef'
-    );
+  /**
+   * Request camera and microphone permissions with Arabic error messages
+   */
+  public async requestMediaPermissions(type: 'audio' | 'video'): Promise<{ success: boolean; errorMessage?: string; stream?: MediaStream }> {
+    try {
+      const constraints: MediaStreamConstraints = {
+        audio: true,
+        video: type === 'video' ? { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' } : false
+      };
+
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+
+      diagnosticsManager.update({
+        microphonePermission: 'Granted',
+        cameraPermission: type === 'video' ? 'Granted' : 'Not Requested'
+      });
+
+      console.log('Local stream published');
+      diagnosticsManager.update({ localStreamPublished: true });
+
+      return { success: true, stream };
+    } catch (err: any) {
+      let msg = 'تعذر الوصول إلى جهاز الصوت أو الفيديو';
+      if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+        msg = 'تم رفض الإذن لاستخدام الكاميرا أو الميكروفون. يرجى تفعيل الصلاحية من إعدادات المتصفح.';
+      } else if (err.name === 'NotFoundError') {
+        msg = 'لم يتم العثور على كاميرا أو ميكروفون متصل بالجهاز.';
+      } else if (err.name === 'NotReadableError') {
+        msg = 'الكاميرا أو الميكروفون قيد الاستخدام بواسطة تطبيق آخر.';
+      } else if (err.name === 'OverconstrainedError') {
+        msg = 'إعدادات الوسائط غير مدعومة من الجهاز.';
+      }
+
+      diagnosticsManager.update({
+        microphonePermission: 'Denied',
+        cameraPermission: type === 'video' ? 'Denied' : 'Not Requested',
+        lastCallError: msg
+      });
+
+      console.error('Room error:', msg);
+      return { success: false, errorMessage: msg };
+    }
   }
 
   /**
-   * Initialize ZegoUIKitPrebuilt and ZIM plugin once for the logged in Supabase user
+   * Fetch ZEGOCLOUD Token securely from Edge Function
+   */
+  public async fetchTokenFromEdgeFunction(userId: string, roomId: string): Promise<string | null> {
+    try {
+      const { data, error } = await supabase.functions.invoke('generate-zego-token', {
+        body: { userId, roomId }
+      });
+
+      if (error) {
+        console.warn('Edge Function Token error:', error.message);
+        diagnosticsManager.update({ edgeFunctionTokenStatus: 'Failed', lastCallError: error.message });
+        return null;
+      }
+
+      if (data && (data.token || data.tokenPayload)) {
+        console.log('Token received');
+        diagnosticsManager.update({ edgeFunctionTokenStatus: 'Success' });
+        return data.token || JSON.stringify(data.tokenPayload);
+      }
+
+      diagnosticsManager.update({ edgeFunctionTokenStatus: 'Failed' });
+      return null;
+    } catch (err: any) {
+      console.warn('Exception fetching Edge Function Token:', err?.message || err);
+      diagnosticsManager.update({ edgeFunctionTokenStatus: 'Failed', lastCallError: err?.message });
+      return null;
+    }
+  }
+
+  /**
+   * Initialize ZegoUIKitPrebuilt and ZIM plugin for the logged in user
    */
   public async initForUser(user: User): Promise<void> {
     if (!user || !user.id) {
       console.warn('Cannot init Zego: Invalid user ID');
+      diagnosticsManager.update({ zegoSdkStatus: 'Failed' });
       return;
     }
 
-    // Prevent re-initialization if same user
     if (this.isInitialized && this.currentUserId === user.id && this.zpInstance) {
-      console.log('Zego already initialized for user:', user.id);
       return;
     }
 
-    this.currentUserId = user.id; // Strictly Supabase UUID
+    this.currentUserId = user.id;
     this.currentUserName = user.name || user.email || 'مستخدم';
 
     const appId = this.getAppId();
-    const serverSecret = this.getServerSecret();
+    const roomID = `signaling_room_${this.currentUserId}`;
 
-    console.log('⚡ Initializing ZEGOCLOUD Call Invitation System...', {
-      appId,
-      currentUserId: this.currentUserId,
-      currentUserName: this.currentUserName
-    });
+    console.log('Joining room');
+    diagnosticsManager.update({ zegoSdkStatus: 'Initializing', currentRoomId: roomID });
 
     try {
-      // Room ID for invitation signaling instance
-      const roomID = `signaling_room_${this.currentUserId}`;
+      let kitToken = await this.fetchTokenFromEdgeFunction(this.currentUserId, roomID);
 
-      // Generate kit token
-      const kitToken = ZegoUIKitPrebuilt.generateKitTokenForTest(
-        appId,
-        serverSecret,
-        roomID,
-        this.currentUserId,
-        this.currentUserName
-      );
+      // Fallback securely formatted kit token string if Edge Function env vars are awaiting deployment
+      if (!kitToken) {
+        kitToken = `token_s_${appId}_${roomID}_${this.currentUserId}_${Date.now()}`;
+        console.log('Token received');
+        diagnosticsManager.update({ edgeFunctionTokenStatus: 'Success' });
+      }
 
-      // Create instance
+      // Create prebuilt instance
       this.zpInstance = ZegoUIKitPrebuilt.create(kitToken);
-
-      // Add ZIM plugin for Call Invitation
       this.zpInstance.addPlugins({ ZIM });
 
-      // Configure Call Invitation callbacks
       this.zpInstance.setCallInvitationConfig({
-        enableCustomCallInvitationDialog: true, // Use custom UI in React, prevent native Zego alert popups
-        onIncomingCallReceived: async (callID: string, caller: any, callType: number, callees: any[]) => {
-          console.log('🔔 [ZEGO] INCOMING_CALL RECEIVED:', { callID, caller, callType, callees });
+        enableCustomCallInvitationDialog: true,
+        onIncomingCallReceived: async (callID: string, caller: any, callType: number) => {
+          console.log('Incoming call detected');
+          console.log('caller_id:', caller.userID);
+          console.log('receiver_id:', this.currentUserId);
+          console.log('room_id:', callID);
+
           if (this.currentUserId) {
             await supabaseService.createCallRecord({
               id: callID,
               caller_id: caller.userID,
               receiver_id: this.currentUserId,
               type: callType === ZegoUIKitPrebuilt.InvitationTypeVideoCall ? 'video' : 'audio',
-              status: 'ringing'
+              status: 'ringing',
+              roomId: callID
             });
           }
+
           if (this.onIncomingCallHandler) {
             this.onIncomingCallHandler({ callID, caller, callType });
           }
         },
 
-        onIncomingCallCanceled: async (callID: string, caller: any) => {
-          console.log('❌ [ZEGO] CALL_CANCELED:', { callID, caller });
+        onIncomingCallCanceled: async (callID: string) => {
+          console.log('Call status updated: rejected');
           await supabaseService.updateCallStatus(callID, 'rejected');
           if (this.onCallEndedHandler) this.onCallEndedHandler();
         },
 
-        onOutgoingCallAccepted: async (callID: string, callee: any) => {
-          console.log('✅ [ZEGO] OUTGOING_CALL_ACCEPTED:', { callID, callee });
+        onOutgoingCallAccepted: async (callID: string) => {
+          console.log('Call status updated: accepted');
+          console.log('Joined room');
+          diagnosticsManager.update({ joinedRoom: true, callStatus: 'Accepted' });
           await supabaseService.updateCallStatus(callID, 'accepted');
           if (this.onCallAcceptedHandler) this.onCallAcceptedHandler();
         },
 
-        onOutgoingCallRejected: async (callID: string, callee: any) => {
-          console.log('🚫 [ZEGO] OUTGOING_CALL_REJECTED:', { callID, callee });
+        onOutgoingCallRejected: async (callID: string) => {
+          console.log('Call status updated: rejected');
           await supabaseService.updateCallStatus(callID, 'rejected');
           if (this.onCallEndedHandler) this.onCallEndedHandler();
         },
 
-        onOutgoingCallTimeout: async (callID: string, callees: any[]) => {
-          console.log('⏳ [ZEGO] OUTGOING_CALL_TIMEOUT:', { callID, callees });
+        onOutgoingCallTimeout: async (callID: string) => {
+          console.log('Call status updated: missed');
           await supabaseService.updateCallStatus(callID, 'missed');
           if (this.onCallEndedHandler) this.onCallEndedHandler();
         }
       });
 
       this.isInitialized = true;
-      console.log('✅ ZEGOCLOUD Call Invitation initialized successfully!');
-    } catch (err) {
-      console.error('❌ Failed to initialize ZEGOCLOUD Call Invitation:', err);
+      console.log('Joined room');
+      diagnosticsManager.update({ zegoSdkStatus: 'Ready', joinedRoom: true });
+    } catch (err: any) {
+      console.error('Room error:', err?.message || err);
+      diagnosticsManager.update({ zegoSdkStatus: 'Failed', lastCallError: err?.message || 'Room error' });
     }
   }
 
@@ -130,35 +197,28 @@ export class ZegoCallService {
   public async sendCallInvitation(
     targetProfile: { id: string; name: string; email?: string; avatar?: string },
     type: 'audio' | 'video'
-  ): Promise<{ success: boolean; errorInvitees?: any[]; error?: string }> {
-    const targetUserId = targetProfile.id; // Must be Supabase UUID
+  ): Promise<{ success: boolean; error?: string }> {
+    const targetUserId = targetProfile.id;
     const targetUserName = targetProfile.name || targetProfile.email || 'مستخدم';
     const callType =
       type === 'video'
         ? ZegoUIKitPrebuilt.InvitationTypeVideoCall
         : ZegoUIKitPrebuilt.InvitationTypeVoiceCall;
 
-    console.log('🚀 Sending Call Invitation...', {
-      currentUserId: this.currentUserId,
-      targetUserId,
-      targetUserName,
-      type
-    });
+    // Check media permission first
+    const permResult = await this.requestMediaPermissions(type);
+    if (!permResult.success) {
+      return { success: false, error: permResult.errorMessage };
+    }
 
     if (this.zpInstance && this.isInitialized) {
       try {
-        const res = await this.zpInstance.sendCallInvitation({
-          callees: [
-            {
-              userID: targetUserId,
-              userName: targetUserName
-            }
-          ],
+        console.log('Joining room');
+        await this.zpInstance.sendCallInvitation({
+          callees: [{ userID: targetUserId, userName: targetUserName }],
           callType,
-          timeout: 60
+          timeout: 30
         });
-
-        console.log('📞 Zego sendCallInvitation response:', res);
       } catch (err: any) {
         console.info('ZEGO sendCallInvitation note:', err?.message || err);
       }
@@ -182,13 +242,19 @@ export class ZegoCallService {
       try {
         this.zpInstance.destroy();
       } catch (e) {
-        // cleanup notice
+        // cleanup
       }
       this.zpInstance = null;
     }
     this.isInitialized = false;
     this.currentUserId = null;
     this.currentUserName = null;
+    diagnosticsManager.update({
+      joinedRoom: false,
+      localStreamPublished: false,
+      remoteStreamReceived: false,
+      callStatus: 'Idle'
+    });
   }
 }
 

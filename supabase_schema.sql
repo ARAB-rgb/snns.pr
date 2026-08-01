@@ -177,38 +177,26 @@ CREATE POLICY "Users can view read receipts for their conversations"
 CREATE TABLE IF NOT EXISTS public.calls (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     caller_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE,
+    receiver_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE,
+    callee_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE,
+    room_id TEXT,
+    channel_id TEXT,
+    type TEXT DEFAULT 'video' CHECK (type IN ('audio', 'video')),
     call_type TEXT DEFAULT 'video' CHECK (call_type IN ('audio', 'video')),
-    zego_room_id TEXT NOT NULL UNIQUE,
-    status TEXT DEFAULT 'dialing' CHECK (status IN ('dialing', 'ringing', 'connected', 'rejected', 'missed', 'ended')),
+    status TEXT DEFAULT 'ringing' CHECK (status IN ('dialing', 'ringing', 'accepted', 'connected', 'rejected', 'busy', 'ended', 'missed', 'failed')),
     started_at TIMESTAMPTZ DEFAULT NOW(),
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    answered_at TIMESTAMPTZ,
     ended_at TIMESTAMPTZ,
     duration_seconds INT DEFAULT 0
 );
 
 ALTER TABLE public.calls ENABLE ROW LEVEL SECURITY;
 
--- --------------------------------------------------------
--- 7. CALL PARTICIPANTS TABLE
--- --------------------------------------------------------
-CREATE TABLE IF NOT EXISTS public.call_participants (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    call_id UUID REFERENCES public.calls(id) ON DELETE CASCADE,
-    user_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE,
-    joined_at TIMESTAMPTZ DEFAULT NOW(),
-    left_at TIMESTAMPTZ,
-    UNIQUE(call_id, user_id)
-);
-
-ALTER TABLE public.call_participants ENABLE ROW LEVEL SECURITY;
-
 CREATE POLICY "Users can view calls they participate in"
     ON public.calls FOR SELECT
     USING (
-        caller_id = auth.uid() OR
-        EXISTS (
-            SELECT 1 FROM public.call_participants cp
-            WHERE cp.call_id = calls.id AND cp.user_id = auth.uid()
-        )
+        auth.uid() = caller_id OR auth.uid() = receiver_id OR auth.uid() = callee_id
     );
 
 CREATE POLICY "Users can create calls"
@@ -217,7 +205,7 @@ CREATE POLICY "Users can create calls"
 
 CREATE POLICY "Users can update their calls"
     ON public.calls FOR UPDATE
-    USING (caller_id = auth.uid());
+    USING (auth.uid() = caller_id OR auth.uid() = receiver_id OR auth.uid() = callee_id);
 
 CREATE POLICY "Participants can view call entries"
     ON public.call_participants FOR SELECT
