@@ -81,16 +81,6 @@ export interface ZegoConfig {
   useLiveSdkSimulation: boolean;
 }
 
-export interface FirebaseConfigState {
-  apiKey: string;
-  authDomain: string;
-  projectId: string;
-  storageBucket: string;
-  messagingSenderId: string;
-  appId: string;
-  isInitialized: boolean;
-}
-
 export interface UserStatus {
   id: string;
   userId: string;

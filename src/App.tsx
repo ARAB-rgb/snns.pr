@@ -457,7 +457,7 @@ function AppContent() {
         />
       )}
 
-      {/* Firebase Auth Modal */}
+      {/* Supabase Auth Modal */}
       {showAuthModal && (
         <AuthModal
           currentUser={currentUser}

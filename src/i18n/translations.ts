@@ -42,7 +42,7 @@ export interface Translations {
   uiDirection: string;
   rtlMode: string;
   ltrMode: string;
-  firebaseAuth: string;
+  supabaseAuth: string;
   zegoConfig: string;
   appId: string;
   serverSecret: string;
@@ -126,7 +126,7 @@ export const TRANSLATIONS: Record<LanguageCode, Translations> = {
     uiDirection: 'UI Direction',
     rtlMode: 'RTL (Right to Left)',
     ltrMode: 'LTR (Left to Right)',
-    firebaseAuth: 'Supabase Auth',
+    supabaseAuth: 'Supabase Auth',
     zegoConfig: 'ZegoCloud Configuration',
     appId: 'Zego App ID',
     serverSecret: 'Server Secret',
@@ -208,7 +208,7 @@ export const TRANSLATIONS: Record<LanguageCode, Translations> = {
     uiDirection: 'اتجاه الواجهة',
     rtlMode: 'من اليمين إلى اليسار (RTL)',
     ltrMode: 'من اليسار إلى اليمين (LTR)',
-    firebaseAuth: 'مصادقة سوبابيس (Supabase)',
+    supabaseAuth: 'مصادقة سوبابيس (Supabase)',
     zegoConfig: 'تكوين زيجو كلاود',
     appId: 'معرف تطبيق زيجو',
     serverSecret: 'الرمز السري للسيرفر',
@@ -290,7 +290,7 @@ export const TRANSLATIONS: Record<LanguageCode, Translations> = {
     uiDirection: 'واسطہ کی سمت',
     rtlMode: 'دائیں سے بائیں (RTL)',
     ltrMode: 'بائیں سے دائیں (LTR)',
-    firebaseAuth: 'فائر بیس توثیق',
+    supabaseAuth: 'سوبابیس توثیق',
     zegoConfig: 'زیگو کلاؤڈ ترتیب',
     appId: 'زیگو ایپ آئی ڈی',
     serverSecret: 'سرور کا خفیہ کوڈ',
@@ -372,7 +372,7 @@ export const TRANSLATIONS: Record<LanguageCode, Translations> = {
     uiDirection: 'የገጽታ አቅጣጫ',
     rtlMode: 'ከቀኝ ወደ ግራ (RTL)',
     ltrMode: 'ከግራ ወደ ቀኝ (LTR)',
-    firebaseAuth: 'Firebase ማረጋገጫ',
+    supabaseAuth: 'Supabase ማረጋገጫ',
     zegoConfig: 'ZegoCloud ማስተካከያ',
     appId: 'Zego መተግበሪያ ID',
     serverSecret: 'የአገልጋይ ሚስጥር',
@@ -454,7 +454,7 @@ export const TRANSLATIONS: Record<LanguageCode, Translations> = {
     uiDirection: 'ইউআই দিকনির্দেশনা',
     rtlMode: 'ডান থেকে বাম (RTL)',
     ltrMode: 'বাম থেকে ডান (LTR)',
-    firebaseAuth: 'ফায়ারবেস অথেন্টিকেশন',
+    supabaseAuth: 'সুপাবেস অথেন্টিকেশন',
     zegoConfig: 'জেগোক্লাউড কনফিগারেশন',
     appId: 'জেগো অ্যাপ আইডি',
     serverSecret: 'সার্ভার সিক্রেট',
@@ -536,7 +536,7 @@ export const TRANSLATIONS: Record<LanguageCode, Translations> = {
     uiDirection: '界面方向',
     rtlMode: '从右至左 (RTL)',
     ltrMode: '从左至右 (LTR)',
-    firebaseAuth: 'Firebase 身份验证',
+    supabaseAuth: 'Supabase 身份验证',
     zegoConfig: 'ZegoCloud 实时音视频配置',
     appId: 'Zego App ID',
     serverSecret: '服务器密钥',

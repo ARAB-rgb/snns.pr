@@ -910,36 +910,7 @@ export class SupabaseService {
       console.warn('Error reading local statuses:', e);
     }
 
-    // Default sample statuses if none exist
-    const now = Date.now();
-    const demoStatuses: UserStatus[] = [
-      {
-        id: 'status-demo-1',
-        userId: '2',
-        userName: 'Sarah Chen',
-        userAvatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150',
-        text: 'Working on Flutter Material 3 design system updates! 🚀',
-        bgColor: 'from-cyan-600 to-blue-800',
-        createdAt: new Date(now - 2 * 3600 * 1000).toISOString(),
-        expiresAt: new Date(now + 22 * 3600 * 1000).toISOString(),
-        viewsCount: 12
-      },
-      {
-        id: 'status-demo-2',
-        userId: '3',
-        userName: 'Alex Rivera',
-        userAvatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150',
-        text: 'Testing ZegoCloud WebRTC integration in low-latency mode 🎙️✨',
-        bgColor: 'from-purple-600 to-indigo-900',
-        createdAt: new Date(now - 5 * 3600 * 1000).toISOString(),
-        expiresAt: new Date(now + 19 * 3600 * 1000).toISOString(),
-        viewsCount: 8
-      }
-    ];
-    try {
-      localStorage.setItem('snns_user_statuses', JSON.stringify(demoStatuses));
-    } catch (e) {}
-    return demoStatuses;
+    return [];
   }
 
   async fetchActiveStatuses(): Promise<UserStatus[]> {
