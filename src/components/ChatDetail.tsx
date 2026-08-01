@@ -8,6 +8,7 @@ import { User, Message } from '../types';
 import { useLanguage } from '../i18n/LanguageContext';
 import { SUPPORTED_LANGUAGES } from '../types/i18n';
 import { sounds } from '../services/audioSynthesizer';
+import { supabaseService } from '../services/supabaseService';
 
 interface ChatDetailProps {
   currentUserId: string;
@@ -68,12 +69,18 @@ export const ChatDetail: React.FC<ChatDetailProps> = ({
         }
       };
 
-      recorder.onstop = () => {
+      recorder.onstop = async () => {
         const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-        const audioUrl = URL.createObjectURL(audioBlob);
-        onSendMessage('تسجيل صوتي', 'audio', audioUrl, undefined, replyingTo || undefined);
-        setReplyingTo(null);
-        sounds.playMessageSentSound();
+        const reader = new FileReader();
+        reader.onloadend = async () => {
+          const base64Audio = reader.result as string;
+          const uploadedUrl = await supabaseService.uploadAttachment(audioBlob, `voice_${Date.now()}.webm`, 'audio/webm');
+          const finalUrl = uploadedUrl || base64Audio;
+          onSendMessage('تسجيل صوتي', 'audio', finalUrl, 'voice_note.webm', replyingTo || undefined);
+          setReplyingTo(null);
+          sounds.playMessageSentSound();
+        };
+        reader.readAsDataURL(audioBlob);
         stream.getTracks().forEach((track) => track.stop());
       };
 
@@ -123,9 +130,12 @@ export const ChatDetail: React.FC<ChatDetailProps> = ({
     const file = e.target.files?.[0];
     if (file) {
       const reader = new FileReader();
-      reader.onload = (event) => {
+      reader.onload = async (event) => {
         if (event.target?.result) {
-          onSendMessage('صورة', 'image', event.target.result as string, file.name, replyingTo || undefined);
+          const base64Data = event.target.result as string;
+          const uploadedUrl = await supabaseService.uploadAttachment(file, file.name, file.type);
+          const finalUrl = uploadedUrl || base64Data;
+          onSendMessage('صورة', 'image', finalUrl, file.name, replyingTo || undefined);
           setReplyingTo(null);
           sounds.playMessageSentSound();
         }
@@ -138,9 +148,12 @@ export const ChatDetail: React.FC<ChatDetailProps> = ({
     const file = e.target.files?.[0];
     if (file) {
       const reader = new FileReader();
-      reader.onload = (event) => {
+      reader.onload = async (event) => {
         if (event.target?.result) {
-          onSendMessage(`ملف: ${file.name}`, 'file', event.target.result as string, file.name, replyingTo || undefined);
+          const base64Data = event.target.result as string;
+          const uploadedUrl = await supabaseService.uploadAttachment(file, file.name, file.type);
+          const finalUrl = uploadedUrl || base64Data;
+          onSendMessage(`ملف: ${file.name}`, 'file', finalUrl, file.name, replyingTo || undefined);
           setReplyingTo(null);
           sounds.playMessageSentSound();
         }

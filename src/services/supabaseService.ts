@@ -338,31 +338,64 @@ export class SupabaseService {
     return [userId1, userId2].sort().join('_');
   }
 
+  // Upload file or blob to Supabase Storage with base64 fallback
+  async uploadAttachment(fileOrBlob: File | Blob, fileName: string, contentType?: string): Promise<string | null> {
+    if (!isSupabaseConfigured) return null;
+    try {
+      const cleanFileName = `${Date.now()}_${fileName.replace(/[^a-zA-Z0-9_.-]/g, '_')}`;
+      const filePath = `chat_media/${cleanFileName}`;
+
+      const { data, error } = await supabase.storage
+        .from('attachments')
+        .upload(filePath, fileOrBlob, {
+          contentType: contentType || fileOrBlob.type || 'application/octet-stream',
+          upsert: true
+        });
+
+      if (!error && data) {
+        const { data: publicData } = supabase.storage.from('attachments').getPublicUrl(filePath);
+        if (publicData?.publicUrl) {
+          return publicData.publicUrl;
+        }
+      } else {
+        // Try 'media' bucket if 'attachments' bucket doesn't exist
+        const { data: data2, error: error2 } = await supabase.storage
+          .from('media')
+          .upload(filePath, fileOrBlob, {
+            contentType: contentType || fileOrBlob.type || 'application/octet-stream',
+            upsert: true
+          });
+
+        if (!error2 && data2) {
+          const { data: publicData2 } = supabase.storage.from('media').getPublicUrl(filePath);
+          if (publicData2?.publicUrl) {
+            return publicData2.publicUrl;
+          }
+        }
+      }
+    } catch (err) {
+      console.info('uploadAttachment notice:', err);
+    }
+    return null;
+  }
+
   // Ensure conversation and member rows exist
   async ensureConversation(user1Id: string, user2Id: string): Promise<string> {
     const convId = this.getConversationId(user1Id, user2Id);
     if (!isSupabaseConfigured) return convId;
 
     try {
-      const { data: existing } = await supabase
-        .from('conversations')
-        .select('id')
-        .eq('id', convId)
-        .single();
+      await supabase.from('conversations').upsert({
+        id: convId,
+        last_message: '',
+        last_sender_id: user1Id,
+        last_message_time: new Date().toISOString()
+      }, { onConflict: 'id' });
 
-      if (!existing) {
-        await supabase.from('conversations').insert({
-          id: convId,
-          last_message: '',
-          last_sender_id: user1Id,
-          last_message_time: new Date().toISOString()
-        });
-
-        await supabase.from('conversation_members').insert([
-          { conversation_id: convId, user_id: user1Id },
-          { conversation_id: convId, user_id: user2Id }
-        ]);
-      }
+      await supabase.from('conversation_members').upsert([
+        { conversation_id: convId, user_id: user1Id },
+        { conversation_id: convId, user_id: user2Id }
+      ], { onConflict: 'conversation_id,user_id' });
     } catch (err) {
       console.error('Error ensuring conversation in Supabase:', err);
     }
@@ -380,18 +413,32 @@ export class SupabaseService {
     }
 
     const fetchConversations = async () => {
-      // Get conversation IDs user belongs to
+      // 1. Get conversation IDs from conversation_members
       const { data: memberRows } = await supabase
         .from('conversation_members')
         .select('conversation_id')
         .eq('user_id', currentUserId);
 
-      if (!memberRows || memberRows.length === 0) {
+      const convIds: string[] = (memberRows || []).map((m: any) => m.conversation_id);
+
+      // 2. Get conversation IDs from messages directly
+      const { data: msgConvs } = await supabase
+        .from('messages')
+        .select('conversation_id')
+        .or(`sender_id.eq.${currentUserId},receiver_id.eq.${currentUserId}`);
+
+      if (msgConvs) {
+        msgConvs.forEach((m: any) => {
+          if (m.conversation_id && !convIds.includes(m.conversation_id)) {
+            convIds.push(m.conversation_id);
+          }
+        });
+      }
+
+      if (convIds.length === 0) {
         callback([]);
         return;
       }
-
-      const convIds = memberRows.map((m: any) => m.conversation_id);
 
       // Fetch conversation details
       const { data: convs } = await supabase
@@ -403,14 +450,20 @@ export class SupabaseService {
       if (convs) {
         const convList = convs.map((c: any) => {
           const members: string[] = (c.conversation_members || []).map((m: any) => m.user_id);
-          const otherUserId = members.find((m) => m !== currentUserId) || currentUserId;
+          let otherUserId = members.find((m) => m !== currentUserId);
+
+          if (!otherUserId && c.id && c.id.includes('_')) {
+            const parts = c.id.split('_');
+            otherUserId = parts.find((p: string) => p !== currentUserId) || currentUserId;
+          }
+
           const time = c.last_message_time
             ? new Date(c.last_message_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
             : 'الآن';
 
           return {
             id: c.id,
-            otherUserId,
+            otherUserId: otherUserId || currentUserId,
             lastMessage: c.last_message || '',
             lastMessageTime: time
           };
@@ -429,10 +482,18 @@ export class SupabaseService {
         { event: '*', schema: 'public', table: 'conversations' },
         () => fetchConversations()
       )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'messages' },
+        () => fetchConversations()
+      )
       .subscribe();
+
+    const interval = setInterval(fetchConversations, 4000);
 
     return () => {
       supabase.removeChannel(channel);
+      clearInterval(interval);
     };
   }
 
@@ -481,13 +542,20 @@ export class SupabaseService {
       .channel(`messages_${conversationId}`)
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'messages', filter: `conversation_id=eq.${conversationId}` },
-        () => fetchMessages()
+        { event: '*', schema: 'public', table: 'messages' },
+        (payload: any) => {
+          if (!payload.new || payload.new.conversation_id === conversationId) {
+            fetchMessages();
+          }
+        }
       )
       .subscribe();
 
+    const interval = setInterval(fetchMessages, 3000);
+
     return () => {
       supabase.removeChannel(channel);
+      clearInterval(interval);
     };
   }
 
