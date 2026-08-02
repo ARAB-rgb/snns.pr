@@ -281,6 +281,7 @@ export class SupabaseService {
       const formattedUuid = toUuidOrText(user.id);
 
       const payload: Record<string, any> = {
+      
         id: formattedUuid,
         user_id: user.id,
         name: user.name,
@@ -731,7 +732,7 @@ export class SupabaseService {
             fileName: m.file_name || undefined,
             replyTo: m.reply_to || undefined,
             isRead: m.is_read ?? true,
-            isDelivered: m.is_delivered ?? true,
+            isDelivered: m.is_read ?? false,
             originalLang: 'ar'
           };
         });
@@ -815,17 +816,16 @@ export class SupabaseService {
     const lastMsgText = type === 'image' ? '📷 صورة' : type === 'audio' ? '🎤 تسجيل صوتي' : type === 'file' ? '📁 ملف' : text;
 
     const payload = {
-      conversation_id: convId,
-      sender_id: senderId,
-      receiver_id: receiverId,
-      text,
-      type,
-      media_url: mediaUrl || null,
-      file_name: fileName || null,
-      reply_to: replyTo || null,
-      is_read: false,
-      is_delivered: true
-    };
+  conversation_id: convId,
+  sender_id: senderId,
+  receiver_id: receiverId,
+  text,
+  type,
+  media_url: mediaUrl ?? null,
+  file_name: fileName ?? null,
+  reply_to: replyTo ?? null,
+  is_read: false
+};
 
     console.log('MESSAGE_INSERT_PAYLOAD', payload);
 
