@@ -1,107 +1,137 @@
-import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import { generateToken04 } from './token04.ts';
+import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import { corsHeaders } from "npm:@supabase/supabase-js@^2/cors";
+import { createClient } from "npm:@supabase/supabase-js@^2";
+import { generateToken04 } from "./token04.ts";
 
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-};
-
-serve(async (req: Request) => {
-  if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders });
+Deno.serve(async (req: Request) => {
+  if (req.method === "OPTIONS") {
+    return new Response("ok", {
+      status: 200,
+      headers: corsHeaders,
+    });
   }
 
   try {
-    const authHeader = req.headers.get('Authorization');
+    const authHeader = req.headers.get("Authorization");
+
     if (!authHeader) {
       return new Response(
-        JSON.stringify({ error: 'Missing Authorization header' }),
-        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        JSON.stringify({ error: "Missing Authorization header" }),
+        {
+          status: 401,
+          headers: {
+            ...corsHeaders,
+            "Content-Type": "application/json",
+          },
+        },
       );
     }
 
-    const supabaseUrl = Deno.env.get('SUPABASE_URL') || '';
-    const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY') || '';
+    const supabaseUrl = Deno.env.get("SUPABASE_URL");
+    const supabasePublishableKey =
+      Deno.env.get("SUPABASE_ANON_KEY") ||
+      Deno.env.get("SUPABASE_PUBLISHABLE_KEY");
 
-    const supabaseClient = createClient(supabaseUrl, supabaseAnonKey, {
-      global: { headers: { Authorization: authHeader } }
-    });
+    if (!supabaseUrl || !supabasePublishableKey) {
+      throw new Error("Supabase server environment is incomplete");
+    }
 
-    const { data: { user }, error: authError } = await supabaseClient.auth.getUser();
+    const supabaseClient = createClient(
+      supabaseUrl,
+      supabasePublishableKey,
+      {
+        global: {
+          headers: {
+            Authorization: authHeader,
+          },
+        },
+      },
+    );
+
+    const {
+      data: { user },
+      error: authError,
+    } = await supabaseClient.auth.getUser();
 
     if (authError || !user) {
       return new Response(
-        JSON.stringify({ error: 'Unauthorized: Invalid or expired user token' }),
-        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        JSON.stringify({ error: "Unauthorized user" }),
+        {
+          status: 401,
+          headers: {
+            ...corsHeaders,
+            "Content-Type": "application/json",
+          },
+        },
       );
     }
 
-    const userId = user.id;
+    const body = await req.json();
+    const roomId = String(body.roomId ?? body.room_id ?? "").trim();
 
-    let body: any = {};
-    try {
-      body = await req.json();
-    } catch (_) {
-      // Empty body
-    }
-
-    const roomId = (body.roomId || body.room_id || 'default_room').toString().trim();
     if (!roomId) {
       return new Response(
-        JSON.stringify({ error: 'Invalid roomId parameter' }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        JSON.stringify({ error: "roomId is required" }),
+        {
+          status: 400,
+          headers: {
+            ...corsHeaders,
+            "Content-Type": "application/json",
+          },
+        },
       );
     }
 
-    const appIdRaw = Deno.env.get('ZEGO_APP_ID') || Deno.env.get('ZEGOCLOUD_APP_ID');
-    const serverSecret = Deno.env.get('ZEGO_SERVER_SECRET') || Deno.env.get('ZEGOCLOUD_SERVER_SECRET');
+    const appId = Number(Deno.env.get("ZEGO_APP_ID"));
+    const serverSecret = Deno.env.get("ZEGO_SERVER_SECRET");
 
-    if (!appIdRaw || !serverSecret) {
-      return new Response(
-        JSON.stringify({
-          error: 'ZEGO credentials missing in environment variables (ZEGO_APP_ID or ZEGO_SERVER_SECRET)'
-        }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
+    if (!Number.isInteger(appId) || !serverSecret) {
+      throw new Error("ZEGO_APP_ID or ZEGO_SERVER_SECRET is missing");
     }
 
-    const appId = Number(appIdRaw);
-    if (isNaN(appId)) {
-      return new Response(
-        JSON.stringify({ error: 'ZEGO_APP_ID must be a valid number' }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
+    const expiresIn = 3600;
 
-    const effectiveTimeInSeconds = 3600;
-
-    // For ZIM Call Invitation and ZegoUIKitPrebuilt initialization, Token04 is user-identity bound
-    // and payload must be empty string '' (not room bound in token generation)
     const token = generateToken04(
       appId,
-      userId,
+      user.id,
       serverSecret,
-      effectiveTimeInSeconds,
-      ''
+      expiresIn,
+      "",
     );
-
-    const expiresAt = Math.floor(Date.now() / 1000) + effectiveTimeInSeconds;
 
     return new Response(
       JSON.stringify({
         token,
         appId,
-        userId,
-        roomId: roomId || undefined,
-        expiresAt
+        userId: user.id,
+        roomId,
+        expiresAt: Math.floor(Date.now() / 1000) + expiresIn,
       }),
-      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      {
+        status: 200,
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json",
+        },
+      },
     );
-  } catch (err: any) {
+  } catch (error) {
+    console.error("GENERATE_ZEGO_TOKEN_ERROR:", error);
+
     return new Response(
-      JSON.stringify({ error: err?.message || 'Internal Server Error' }),
-      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      JSON.stringify({
+        error:
+          error instanceof Error
+            ? error.message
+            : "Internal Server Error",
+      }),
+      {
+        status: 500,
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json",
+        },
+      },
     );
   }
 });
