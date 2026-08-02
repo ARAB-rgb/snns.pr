@@ -524,14 +524,32 @@ export class SupabaseService {
   }
 
   // Ensure conversation and member rows exist with genuine UUID
-  async ensureConversation(user1Id: string, user2Id: string): Promise<string> {
-    if (!user1Id || !user2Id) {
-      return '';
-    }
+  async ensureConversation(
+  currentUserId: string,
+  otherUserId: string,
+): Promise<string> {
+  if (!currentUserId || !otherUserId) {
+    throw new Error('معرف المستخدم غير موجود');
+  }
 
-    if (!isSupabaseConfigured) {
-      return crypto.randomUUID();
-    }
+  const { data, error } = await supabase.rpc(
+    'create_direct_conversation',
+    {
+      other_user_id: otherUserId,
+    },
+  );
+
+  if (error) {
+    console.error('CREATE_CONVERSATION_RPC_ERROR', error);
+    throw new Error(error.message);
+  }
+
+  if (!data) {
+    throw new Error('لم يتم إنشاء المحادثة');
+  }
+
+  return data as string;
+}
 
     try {
       // 1. Check if a conversation already exists between user1Id and user2Id
