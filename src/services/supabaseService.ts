@@ -281,7 +281,6 @@ export class SupabaseService {
       const formattedUuid = toUuidOrText(user.id);
 
       const payload: Record<string, any> = {
-      
         id: formattedUuid,
         user_id: user.id,
         name: user.name,
@@ -617,20 +616,6 @@ export class SupabaseService {
 
       const convIds: string[] = (memberRows || []).map((m: any) => m.conversation_id);
 
-      // 2. Get conversation IDs from messages directly
-      const { data: msgConvs } = await supabase
-        .from('messages')
-        .select('conversation_id')
-        .or(`sender_id.eq.${currentUserId},receiver_id.eq.${currentUserId}`);
-
-      if (msgConvs) {
-        msgConvs.forEach((m: any) => {
-          if (m.conversation_id && !convIds.includes(m.conversation_id)) {
-            convIds.push(m.conversation_id);
-          }
-        });
-      }
-
       if (convIds.length === 0) {
         callback([]);
         return;
@@ -724,15 +709,15 @@ export class SupabaseService {
           return {
             id: m.id,
             senderId: m.sender_id,
-            receiverId: m.receiver_id,
-            text: m.text || '',
+            receiverId: '',
+            text: m.body || '',
             timestamp: dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
             type: m.type || 'text',
             mediaUrl: m.media_url || undefined,
             fileName: m.file_name || undefined,
             replyTo: m.reply_to || undefined,
             isRead: m.is_read ?? true,
-            isDelivered: m.is_read ?? false,
+            isDelivered: m.is_delivered ?? true,
             originalLang: 'ar'
           };
         });
@@ -755,13 +740,11 @@ export class SupabaseService {
             console.log('Message received');
             console.log('conversation_id:', payload.new?.conversation_id || conversationId);
             console.log('sender_id:', payload.new?.sender_id);
-            console.log('receiver_id:', payload.new?.receiver_id);
 
             diagnosticsManager.update({
               lastReceivedStatus: 'Success',
               lastConversationId: payload.new?.conversation_id || conversationId,
               lastSenderId: payload.new?.sender_id,
-              lastReceiverId: payload.new?.receiver_id
             });
 
             fetchMessages();
@@ -816,16 +799,16 @@ export class SupabaseService {
     const lastMsgText = type === 'image' ? '📷 صورة' : type === 'audio' ? '🎤 تسجيل صوتي' : type === 'file' ? '📁 ملف' : text;
 
     const payload = {
-  conversation_id: convId,
-  sender_id: senderId,
-  receiver_id: receiverId,
-  text,
-  type,
-  media_url: mediaUrl ?? null,
-  file_name: fileName ?? null,
-  reply_to: replyTo ?? null,
-  is_read: false
-};
+      conversation_id: convId,
+      sender_id: senderId,
+      body: text,
+      type,
+      media_url: mediaUrl ?? null,
+      file_name: fileName ?? null,
+      reply_to: replyTo?.id ?? null,
+      is_read: false,
+      is_delivered: true
+    };
 
     console.log('MESSAGE_INSERT_PAYLOAD', payload);
 
