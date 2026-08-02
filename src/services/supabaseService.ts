@@ -103,39 +103,26 @@ export function toUuidOrText(uid: string): string {
 }
 
 export class SupabaseService {
-  // Sync user profile from Supabase Auth user directly into public.profiles
+  // Sync the authenticated Supabase user into public.profiles.
   async syncUserProfileFromAuth(sbUser: any): Promise<void> {
-    if (!isSupabaseConfigured || !sbUser) return;
-    try {
-      const metadata = sbUser.user_metadata || {};
-      const fullName = metadata.full_name || metadata.name || sbUser.email?.split('@')[0] || 'مستخدم';
-      const avatarUrl =
-        metadata.avatar_url ||
-        metadata.picture ||
-        'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150';
+    if (!isSupabaseConfigured || !sbUser?.id) return;
 
-      const now = new Date().toISOString();
+    const metadata = sbUser.user_metadata || {};
+    const now = new Date().toISOString();
+    const payload = {
+      id: sbUser.id,
+      full_name: metadata.full_name || metadata.name || sbUser.email?.split('@')[0] || 'مستخدم',
+      email: sbUser.email || null,
+      avatar_url: metadata.avatar_url || metadata.picture || null,
+      language: 'ar',
+      profile_visibility: 'public',
+      is_online: true,
+      last_seen: now,
+      updated_at: now
+    };
 
-      const payload: Record<string, any> = {
-        id: sbUser.id,
-        user_id: sbUser.id,
-        full_name: fullName,
-        email: sbUser.email || '',
-        avatar_url: avatarUrl,
-        language: 'ar',
-        profile_visibility: 'public',
-        is_online: true,
-        last_seen: now,
-        updated_at: now
-      };
-
-      const { error } = await supabase.from('profiles').upsert(payload, { onConflict: 'id' });
-      if (error) {
-        console.info('syncUserProfileFromAuth notice:', error.message || error);
-      }
-    } catch (err) {
-      console.info('syncUserProfileFromAuth exception:', err);
-    }
+    const { error } = await supabase.from('profiles').upsert(payload, { onConflict: 'id' });
+    if (error) console.error('PROFILE_SYNC_ERROR', error);
   }
 
   // Helper for localStorage state fallback
@@ -268,155 +255,83 @@ export class SupabaseService {
     }
   }
 
-  // Sync user profile in Supabase 'profiles' table with error resilience and fallbacks
-  async syncUserProfile(user: User, idToken?: string): Promise<void> {
-    if (!isSupabaseConfigured) return;
-    try {
-      if (idToken && (supabase as any).rest) {
-        (supabase as any).rest.headers['Authorization'] = `Bearer ${idToken}`;
-      }
-
-      const formattedUuid = toUuidOrText(user.id);
-
-      const payload: Record<string, any> = {
-        id: formattedUuid,
-        user_id: user.id,
-        full_name: user.name,
-        email: user.email || '',
-        avatar_url: user.avatar || '',
-        phone: user.phone || '',
-        language: user.language || 'ar',
-        is_online: true,
-        last_seen: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      };
-
-      // 1. Attempt upsert with UUID
-      const { error } = await supabase.from('profiles').upsert(payload, { onConflict: 'id' });
-      if (error) {
-        // 2. Fallback: try raw string id if profiles.id is text
-        const rawPayload = { ...payload, id: user.id };
-        const { error: rawErr } = await supabase.from('profiles').upsert(rawPayload, { onConflict: 'id' });
-        if (rawErr) {
-          // 3. Fallback: update by user_id or id
-          const { error: updateErr } = await supabase.from('profiles').update(payload).eq('user_id', user.id);
-          if (updateErr) {
-            console.info('Supabase profiles sync note:', updateErr.message || updateErr);
-          }
-        }
-      }
-    } catch (err) {
-      console.info('syncUserProfile notice:', err);
-    }
+  // Sync an application User into public.profiles using the Supabase Auth UUID.
+  async syncUserProfile(user: User, _idToken?: string): Promise<void> {
+    if (!isSupabaseConfigured || !user?.id) return;
+    const now = new Date().toISOString();
+    const { error } = await supabase.from('profiles').upsert({
+      id: user.id,
+      full_name: user.name,
+      email: user.email || null,
+      avatar_url: user.avatar || null,
+      phone: user.phone || null,
+      language: user.language || 'ar',
+      profile_visibility: 'public',
+      is_online: true,
+      last_seen: now,
+      updated_at: now
+    }, { onConflict: 'id' });
+    if (error) console.error('PROFILE_SYNC_ERROR', error);
   }
 
-  // Update user online status
   async setUserPresence(userId: string, isOnline: boolean): Promise<void> {
-    if (!isSupabaseConfigured) return;
-    try {
-      const formattedUuid = toUuidOrText(userId);
-      await supabase.from('profiles').update({
-        is_online: isOnline,
-        last_seen: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      }).or(`id.eq.${formattedUuid},id.eq.${userId},user_id.eq.${userId}`);
-    } catch (err) {
-      console.warn('Failed to update presence in Supabase:', err);
-    }
+    if (!isSupabaseConfigured || !userId) return;
+    const { error } = await supabase.from('profiles').update({
+      is_online: isOnline,
+      last_seen: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    }).eq('id', userId);
+    if (error) console.warn('PRESENCE_UPDATE_ERROR', error);
   }
 
-  // Subscribe to real users list from 'profiles' table with Follows & Privacy enrichment
   subscribeUsers(currentUserId: string, callback: (users: User[]) => void): () => void {
     if (!isSupabaseConfigured) {
       callback([]);
       return () => {};
     }
 
-    const currentUuid = toUuidOrText(currentUserId);
-
     const fetchUsers = async () => {
-      try {
-        const { data, error } = await supabase
-          .from('profiles')
-          .select('*');
-
-        if (!error && data) {
-          const myFollowing = this.getLocalFollows(currentUserId);
-          const myPrivacy = this.getLocalPrivacy(currentUserId);
-
-          // Exclude current user by checking raw id, user_id, and formatted UUID
-          const otherProfiles = data.filter(
-            (p: any) =>
-              p.id !== currentUserId &&
-              p.id !== currentUuid &&
-              p.user_id !== currentUserId
-          );
-
-          const userList: User[] = otherProfiles.map((p: any) => {
-            const profileUserId = p.user_id || p.id;
-            const userFollowers = this.getLocalFollowers(profileUserId);
-            const isFollowed = myFollowing.includes(profileUserId);
-            const userPrivacy = this.getLocalPrivacy(profileUserId);
-
-            // Respect privacy setting for online status
-            let isOnline = p.is_online ?? false;
-            if (userPrivacy.hideOnlineStatus) {
-              isOnline = false;
-            }
-
-            let lastSeenText = p.last_seen
-              ? new Date(p.last_seen).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-              : 'غير متصل';
-
-            if (userPrivacy.lastSeenVisibility === 'nobody') {
-              lastSeenText = 'مخفي';
-            } else if (userPrivacy.lastSeenVisibility === 'followers' && !isFollowed) {
-              lastSeenText = 'للمتابعين فقط';
-            }
-
-            return {
-              id: profileUserId,
-              name: p.full_name || p.email?.split('@')[0] || 'مستخدم',
-              avatar: p.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
-              email: p.email,
-              phone: p.phone,
-              language: p.language || 'ar',
-              isOnline,
-              lastSeen: lastSeenText,
-              statusText: isOnline ? 'متصل الآن' : lastSeenText,
-              followersCount: userFollowers.length,
-              followingCount: this.getLocalFollows(profileUserId).length,
-              isFollowedByMe: isFollowed,
-              privacySettings: userPrivacy
-            };
-          });
-
-          // Filter out blocked users
-          const filteredList = userList.filter((u) => !myPrivacy.blockedUserIds.includes(u.id));
-          callback(filteredList);
-        } else if (error) {
-          console.info('Supabase profiles fetch note:', error.message || error);
-        }
-      } catch (err) {
-        console.warn('Error in fetchUsers:', err);
+      const { data, error } = await supabase.from('profiles').select('*').neq('id', currentUserId);
+      if (error) {
+        console.error('PROFILES_FETCH_ERROR', error);
+        callback([]);
+        return;
       }
+
+      const myFollowing = this.getLocalFollows(currentUserId);
+      const myPrivacy = this.getLocalPrivacy(currentUserId);
+      const users = (data || []).map((p: any): User => {
+        const privacy = this.getLocalPrivacy(p.id);
+        const followed = myFollowing.includes(p.id);
+        let online = Boolean(p.is_online);
+        if (privacy.hideOnlineStatus) online = false;
+        let lastSeen = p.last_seen ? new Date(p.last_seen).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'غير متصل';
+        if (privacy.lastSeenVisibility === 'nobody') lastSeen = 'مخفي';
+        if (privacy.lastSeenVisibility === 'followers' && !followed) lastSeen = 'للمتابعين فقط';
+        return {
+          id: p.id,
+          name: p.full_name || p.email?.split('@')[0] || 'مستخدم',
+          avatar: p.avatar_url || '',
+          email: p.email || undefined,
+          phone: p.phone || undefined,
+          language: p.language || 'ar',
+          isOnline: online,
+          lastSeen,
+          statusText: p.status_text || (online ? 'متصل الآن' : lastSeen),
+          followersCount: this.getLocalFollowers(p.id).length,
+          followingCount: this.getLocalFollows(p.id).length,
+          isFollowedByMe: followed,
+          privacySettings: privacy
+        };
+      }).filter((u: User) => !myPrivacy.blockedUserIds.includes(u.id));
+      callback(users);
     };
 
-    fetchUsers();
-
-    // Subscribe to realtime changes on profiles table
-    const channel = supabase
-      .channel('profiles_realtime')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'profiles' },
-        () => fetchUsers()
-      )
+    void fetchUsers();
+    const channel = supabase.channel(`profiles_${currentUserId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, fetchUsers)
       .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    return () => { void supabase.removeChannel(channel); };
   }
 
   // Get or ensure conversation UUID for two users
@@ -433,7 +348,10 @@ export class SupabaseService {
 
     try {
       const cleanFileName = `${Date.now()}_${fileName.replace(/[^a-zA-Z0-9_.-]/g, '_')}`;
-      const filePath = `uploads/${cleanFileName}`;
+      const { data: authData } = await supabase.auth.getUser();
+      const ownerId = authData.user?.id;
+      if (!ownerId) throw new Error('انتهت الجلسة، سجل الدخول مجددًا');
+      const filePath = `${ownerId}/${cleanFileName}`;
       const mimeType = contentType || fileOrBlob.type || 'application/octet-stream';
 
       // 1. Try 'chat-media' bucket
@@ -523,272 +441,105 @@ export class SupabaseService {
     return storagePathOrUrl;
   }
 
-  // Ensure conversation and member rows exist with genuine UUID
-  async ensureConversation(
-    currentUserId: string,
-    otherUserId: string
-  ): Promise<string> {
-    if (!currentUserId || !otherUserId) {
-      return '';
+  // Ensure one direct conversation exists. Creation is performed by a SECURITY DEFINER RPC.
+  async ensureConversation(currentUserId: string, otherUserId: string): Promise<string> {
+    if (!isSupabaseConfigured) throw new Error('Supabase غير مهيأ');
+    if (!currentUserId || !otherUserId || currentUserId === otherUserId) {
+      throw new Error('معرفات المحادثة غير صحيحة');
     }
 
-    if (!isSupabaseConfigured) {
-      return crypto.randomUUID();
+    const { data, error } = await supabase.rpc('create_direct_conversation', {
+      other_user_id: otherUserId
+    });
+    if (error) {
+      console.error('CREATE_DIRECT_CONVERSATION_ERROR', error);
+      throw new Error(error.message);
     }
-
-    // Try RPC 'create_direct_conversation' first
-    try {
-      const { data, error } = await supabase.rpc('create_direct_conversation', {
-        other_user_id: otherUserId,
-      });
-
-      if (!error && data) {
-        return data as string;
-      }
-      if (error) {
-        console.warn('CREATE_CONVERSATION_RPC_WARN', error.message);
-      }
-    } catch (rpcErr) {
-      console.warn('RPC exception, falling back to direct table queries:', rpcErr);
-    }
-
-    // Fallback: direct table queries
-    try {
-      // 1. Check if a conversation already exists between currentUserId and otherUserId
-      const { data: user1Members } = await supabase
-        .from('conversation_members')
-        .select('conversation_id')
-        .eq('user_id', currentUserId);
-
-      if (user1Members && user1Members.length > 0) {
-        const convIds = user1Members.map((m: any) => m.conversation_id).filter(Boolean);
-        if (convIds.length > 0) {
-          const { data: sharedMembers } = await supabase
-            .from('conversation_members')
-            .select('conversation_id')
-            .eq('user_id', otherUserId)
-            .in('conversation_id', convIds)
-            .limit(1);
-
-          if (sharedMembers && sharedMembers.length > 0 && sharedMembers[0].conversation_id) {
-            return sharedMembers[0].conversation_id;
-          }
-        }
-      }
-
-      // 2. If no existing conversation was found, create a new conversation with a UUID
-      const newConvId = crypto.randomUUID();
-
-      const { data: newConv, error: createError } = await supabase
-        .from('conversations')
-        .insert({
-          id: newConvId,
-          last_message: '',
-          last_sender_id: currentUserId,
-          last_message_time: new Date().toISOString()
-        })
-        .select('id')
-        .single();
-
-      const finalConvId = newConv?.id || newConvId;
-
-      if (createError) {
-        console.error('Error creating conversation row in Supabase:', createError.message || createError);
-      }
-
-      // 3. Insert membership rows for both users
-      const { error: membersError } = await supabase
-        .from('conversation_members')
-        .upsert([
-          { conversation_id: finalConvId, user_id: currentUserId },
-          { conversation_id: finalConvId, user_id: otherUserId }
-        ], { onConflict: 'conversation_id,user_id' });
-
-      if (membersError) {
-        console.error('Error inserting conversation_members in Supabase:', membersError.message || membersError);
-      }
-
-      return finalConvId;
-    } catch (err: any) {
-      console.error('Exception in ensureConversation:', err?.message || err);
-      return crypto.randomUUID();
-    }
+    if (typeof data !== 'string' || !data) throw new Error('لم يتم إرجاع معرف المحادثة');
+    diagnosticsManager.update({ lastConversationId: data });
+    return data;
   }
 
-  // Subscribe to real conversations for current user
   subscribeConversations(
     currentUserId: string,
     callback: (conversations: Array<{ id: string; otherUserId: string; lastMessage: string; lastMessageTime: string }>) => void
   ): () => void {
-    if (!isSupabaseConfigured) {
-      callback([]);
-      return () => {};
-    }
+    if (!isSupabaseConfigured) { callback([]); return () => {}; }
 
     const fetchConversations = async () => {
-      // 1. Get conversation IDs from conversation_members
-      const { data: memberRows } = await supabase
-        .from('conversation_members')
-        .select('conversation_id')
-        .eq('user_id', currentUserId);
+      const { data: memberships, error: memberError } = await supabase
+        .from('conversation_members').select('conversation_id').eq('user_id', currentUserId);
+      if (memberError) { console.error('CONVERSATION_MEMBERS_FETCH_ERROR', memberError); return; }
+      const ids = Array.from(new Set<string>((memberships || []).map((r: any) => String(r.conversation_id))));
+      if (!ids.length) { callback([]); return; }
 
-      const convIds: string[] = (memberRows || []).map((m: any) => m.conversation_id);
+      const { data: allMembers, error: allMembersError } = await supabase
+        .from('conversation_members').select('conversation_id,user_id').in('conversation_id', ids);
+      if (allMembersError) { console.error('CONVERSATION_MEMBER_LIST_ERROR', allMembersError); return; }
 
-      if (convIds.length === 0) {
-        callback([]);
-        return;
-      }
+      const { data: latestMessages, error: msgError } = await supabase
+        .from('messages').select('conversation_id,body,type,created_at').in('conversation_id', ids)
+        .order('created_at', { ascending: false });
+      if (msgError) console.error('CONVERSATION_SUMMARY_ERROR', msgError);
 
-      // Fetch conversation details
-      const { data: convs } = await supabase
-        .from('conversations')
-        .select('*, conversation_members(user_id)')
-        .in('id', convIds)
-        .order('updated_at', { ascending: false });
-
-      if (convs) {
-        const convList = convs.map((c: any) => {
-          const members: string[] = (c.conversation_members || []).map((m: any) => m.user_id);
-          const otherUserId = members.find((m) => m !== currentUserId) || currentUserId;
-
-          const time = c.last_message_time
-            ? new Date(c.last_message_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-            : 'الآن';
-
-          return {
-            id: c.id,
-            otherUserId: otherUserId || currentUserId,
-            lastMessage: c.last_message || '',
-            lastMessageTime: time
-          };
-        });
-
-        callback(convList);
-      }
-    };
-
-    fetchConversations();
-
-    const channel = supabase
-      .channel('conversations_realtime')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'conversations' },
-        () => fetchConversations()
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'messages' },
-        () => fetchConversations()
-      )
-      .subscribe((status, err) => {
-        if (status === 'SUBSCRIBED') {
-          console.log(`📡 [Realtime] Conversations channel active for user ${currentUserId}`);
-        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-          console.warn(`⚠️ [Realtime] Conversations subscription notice (${status}):`, err || 'Connecting...');
-        }
+      const firstByConversation = new Map<string, any>();
+      for (const row of latestMessages || []) if (!firstByConversation.has(row.conversation_id)) firstByConversation.set(row.conversation_id, row);
+      const rows = ids.map((id) => {
+        const members = (allMembers || []).filter((m: any) => m.conversation_id === id);
+        const otherUserId = members.find((m: any) => m.user_id !== currentUserId)?.user_id || currentUserId;
+        const last = firstByConversation.get(id);
+        const label = !last ? '' : last.type === 'image' ? '📷 صورة' : last.type === 'audio' ? '🎤 تسجيل صوتي' : last.type === 'file' ? '📁 ملف' : (last.body || '');
+        return {
+          id,
+          otherUserId,
+          lastMessage: label,
+          lastMessageTime: last?.created_at ? new Date(last.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''
+        };
       });
-
-    const interval = setInterval(fetchConversations, 4000);
-
-    return () => {
-      supabase.removeChannel(channel);
-      clearInterval(interval);
+      callback(rows);
     };
+
+    void fetchConversations();
+    const channel = supabase.channel(`conversation_list_${currentUserId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'conversation_members' }, fetchConversations)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, fetchConversations)
+      .subscribe();
+    return () => { void supabase.removeChannel(channel); };
   }
 
-  // Subscribe to real-time messages for a conversation
-  subscribeMessages(
-    conversationId: string,
-    callback: (messages: Message[]) => void
-  ): () => void {
-    if (!isSupabaseConfigured) {
-      callback([]);
-      return () => {};
-    }
-
-    console.log('Supabase connected');
-    diagnosticsManager.update({ authStatus: 'Connected', dbStatus: 'Connected' });
+  subscribeMessages(conversationId: string, callback: (messages: Message[]) => void): () => void {
+    if (!isSupabaseConfigured || !conversationId) { callback([]); return () => {}; }
 
     const fetchMessages = async () => {
-      const { data, error } = await supabase
-        .from('messages')
-        .select('*')
-        .eq('conversation_id', conversationId)
+      const { data, error } = await supabase.from('messages').select('*')
+        .eq('conversation_id', conversationId).eq('is_deleted', false)
         .order('created_at', { ascending: true });
-
-      if (error) {
-        console.error('Error fetching messages from database:', error.message);
-        diagnosticsManager.update({ dbStatus: 'Failed' });
-      } else if (data) {
-        diagnosticsManager.update({ dbStatus: 'Connected' });
-        const msgList: Message[] = data.map((m: any) => {
-          const dateObj = m.created_at ? new Date(m.created_at) : new Date();
-          return {
-            id: m.id,
-            senderId: m.sender_id,
-            receiverId: '',
-            text: m.body || '',
-            timestamp: dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-            type: m.type || 'text',
-            mediaUrl: m.media_url || undefined,
-            fileName: m.file_name || undefined,
-            replyTo: m.reply_to || undefined,
-            isRead: m.is_read ?? true,
-            isDelivered: m.is_delivered ?? true,
-            originalLang: 'ar'
-          };
-        });
-        callback(msgList);
-      }
+      if (error) { console.error('MESSAGES_FETCH_ERROR', error); diagnosticsManager.update({ dbStatus: 'Failed' }); return; }
+      const rows: Message[] = (data || []).map((m: any) => ({
+        id: m.id,
+        senderId: m.sender_id,
+        receiverId: '',
+        text: m.body || '',
+        timestamp: new Date(m.created_at || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        type: m.type || 'text',
+        mediaUrl: m.media_url || undefined,
+        fileName: m.file_name || undefined,
+        replyTo: m.reply_to ? { id: m.reply_to, text: '' } : undefined,
+        isRead: Boolean(m.is_read),
+        isDelivered: Boolean(m.is_delivered),
+        originalLang: 'ar'
+      }));
+      callback(rows);
+      diagnosticsManager.update({ dbStatus: 'Connected' });
     };
 
-    fetchMessages();
-
-    console.log('Realtime channel created');
-    const channelName = `messages_${conversationId}`;
-
-    const channel = supabase
-      .channel(channelName)
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'messages' },
-        (payload: any) => {
-          if (!payload.new || payload.new.conversation_id === conversationId) {
-            console.log('Message received');
-            console.log('conversation_id:', payload.new?.conversation_id || conversationId);
-            console.log('sender_id:', payload.new?.sender_id);
-
-            diagnosticsManager.update({
-              lastReceivedStatus: 'Success',
-              lastConversationId: payload.new?.conversation_id || conversationId,
-              lastSenderId: payload.new?.sender_id,
-              lastReceiverId: undefined
-            });
-
-            fetchMessages();
-          }
-        }
-      )
-      .subscribe((status, err) => {
-        if (status === 'SUBSCRIBED') {
-          console.log('SUBSCRIBED');
-          diagnosticsManager.update({ realtimeStatus: 'SUBSCRIBED' });
-        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-          console.warn(`Realtime channel status notice (${status}):`, err || '');
-          diagnosticsManager.update({ realtimeStatus: 'Failed' });
-        }
-      });
-
-    const interval = setInterval(fetchMessages, 3000);
-
-    return () => {
-      supabase.removeChannel(channel);
-      clearInterval(interval);
-    };
+    void fetchMessages();
+    const channel = supabase.channel(`messages_${conversationId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'messages', filter: `conversation_id=eq.${conversationId}` }, fetchMessages)
+      .subscribe((status) => diagnosticsManager.update({ realtimeStatus: status === 'SUBSCRIBED' ? 'SUBSCRIBED' : 'Connecting' }));
+    return () => { void supabase.removeChannel(channel); };
   }
 
-  // Send message to Supabase
   async sendMessage(
     senderId: string,
     receiverId: string,
@@ -798,94 +549,30 @@ export class SupabaseService {
     fileName?: string,
     replyTo?: { id: string; text: string; senderName?: string }
   ): Promise<boolean> {
-    const convId = await this.ensureConversation(senderId, receiverId);
-
-    if (!isSupabaseConfigured) {
-      console.warn('Supabase client is not configured.');
-      console.log('Message insert failed');
-      console.log('conversation_id:', convId);
-      console.log('sender_id:', senderId);
-      console.log('receiver_id:', receiverId);
-      diagnosticsManager.update({
-        lastInsertStatus: 'Failed',
-        lastConversationId: convId,
-        lastSenderId: senderId,
-        lastReceiverId: receiverId
-      });
-      return false;
-    }
-
-    const lastMsgText = type === 'image' ? '📷 صورة' : type === 'audio' ? '🎤 تسجيل صوتي' : type === 'file' ? '📁 ملف' : text;
-
-    const payload = {
-      conversation_id: convId,
-      sender_id: senderId,
-      body: text,
-      type,
-      media_url: mediaUrl || null,
-      file_name: fileName || null,
-      reply_to: replyTo?.id || null,
-      is_read: false,
-      is_delivered: true
-    };
-
-    console.log('MESSAGE_INSERT_PAYLOAD', payload);
-
+    if (!isSupabaseConfigured) return false;
     try {
-      const { data, error: msgError } = await supabase.from('messages').insert(payload).select().single();
-
-      console.log('MESSAGE_INSERT_DATA', data);
-      console.error('MESSAGE_INSERT_ERROR', msgError);
-
-      if (msgError) {
-        console.error('Message insert failed:', msgError.message || msgError);
-        console.log('conversation_id:', convId);
-        console.log('sender_id:', senderId);
-        console.log('receiver_id:', receiverId);
-
-        diagnosticsManager.update({
-          lastInsertStatus: 'Failed',
-          lastConversationId: convId,
-          lastSenderId: senderId,
-          lastReceiverId: receiverId
-        });
-        return false;
-      }
-
-      console.log('Message insert success');
-      console.log('conversation_id:', convId);
-      console.log('sender_id:', senderId);
-      console.log('receiver_id:', receiverId);
-
-      diagnosticsManager.update({
-        lastInsertStatus: 'Success',
-        lastConversationId: convId,
-        lastSenderId: senderId,
-        lastReceiverId: receiverId
-      });
-
-      // Update conversation summary
-      await supabase.from('conversations').update({
-        last_message: lastMsgText,
-        last_sender_id: senderId,
-        last_message_time: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      }).eq('id', convId);
-
+      const conversationId = await this.ensureConversation(senderId, receiverId);
+      const payload = {
+        conversation_id: conversationId,
+        sender_id: senderId,
+        type,
+        body: text || '',
+        media_url: mediaUrl || null,
+        file_name: fileName || null,
+        reply_to: replyTo?.id || null,
+        is_forwarded: false,
+        is_edited: false,
+        is_deleted: false,
+        is_delivered: true,
+        is_read: false
+      };
+      const { error } = await supabase.from('messages').insert(payload);
+      if (error) { console.error('MESSAGE_INSERT_ERROR', error, payload); diagnosticsManager.update({ lastInsertStatus: 'Failed' }); return false; }
+      diagnosticsManager.update({ lastInsertStatus: 'Success', lastConversationId: conversationId, lastSenderId: senderId, lastReceiverId: receiverId });
       return true;
-    } catch (err: any) {
-      console.error('MESSAGE_INSERT_ERROR', err);
-      console.error('Message insert failed', err?.message || err);
-      console.log('conversation_id:', convId);
-      console.log('sender_id:', senderId);
-      console.log('receiver_id:', receiverId);
-
-      diagnosticsManager.update({
-        lastInsertStatus: 'Failed',
-        lastConversationId: convId,
-        lastSenderId: senderId,
-        lastReceiverId: receiverId
-      });
+    } catch (error) {
+      console.error('SEND_MESSAGE_ERROR', error);
+      diagnosticsManager.update({ lastInsertStatus: 'Failed' });
       return false;
     }
   }
@@ -900,63 +587,29 @@ export class SupabaseService {
     }
   }
 
-  // Subscribe to Call Logs
+  // Calls use the live table shape: conversation_id, room_name, caller_id, callee_id, call_type, type, status, started_at.
   subscribeCallLogs(currentUserId: string, callback: (calls: CallLog[]) => void): () => void {
-    if (!isSupabaseConfigured) {
-      callback([]);
-      return () => {};
-    }
-
+    if (!isSupabaseConfigured) { callback([]); return () => {}; }
     const fetchCalls = async () => {
-      const { data } = await supabase
-        .from('calls')
-        .select('*')
-        .or(`caller_id.eq.${currentUserId},receiver_id.eq.${currentUserId}`)
+      const { data, error } = await supabase.from('calls').select('*')
+        .or(`caller_id.eq.${currentUserId},callee_id.eq.${currentUserId}`)
         .order('started_at', { ascending: false });
-
-      if (data) {
-        const logs: CallLog[] = data.map((c: any) => {
-          const isCaller = c.caller_id === currentUserId;
-          const otherId = isCaller ? c.receiver_id : c.caller_id;
-          const direction = isCaller
-            ? 'outgoing'
-            : c.status === 'rejected' || c.status === 'missed'
-            ? 'missed'
-            : 'incoming';
-
-          const dateObj = c.started_at ? new Date(c.started_at) : new Date();
-
-          return {
-            id: c.id,
-            participantId: otherId,
-            type: c.type || 'video',
-            direction,
-            timestamp: dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-            duration: c.duration ? `${c.duration}s` : undefined,
-            zegoRoomId: c.channel_id || c.id
-          };
-        });
-        callback(logs);
-      }
+      if (error) { console.error('CALL_LOGS_FETCH_ERROR', error); return; }
+      callback((data || []).map((c: any) => ({
+        id: c.conversation_id,
+        participantId: c.caller_id === currentUserId ? c.callee_id : c.caller_id,
+        type: (c.call_type || c.type || 'video') as 'audio' | 'video',
+        direction: c.caller_id === currentUserId ? 'outgoing' : (c.status === 'missed' || c.status === 'rejected' ? 'missed' : 'incoming'),
+        timestamp: new Date(c.started_at || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        zegoRoomId: c.room_name || c.conversation_id
+      })));
     };
-
-    fetchCalls();
-
-    const channel = supabase
-      .channel('calls_realtime')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'calls' },
-        () => fetchCalls()
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    void fetchCalls();
+    const channel = supabase.channel(`calls_${currentUserId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'calls' }, fetchCalls).subscribe();
+    return () => { void supabase.removeChannel(channel); };
   }
 
-  // Create call record with status (ringing, accepted, rejected, missed, ended)
   async createCallRecord(params: {
     id?: string;
     caller_id: string;
@@ -965,246 +618,75 @@ export class SupabaseService {
     status: 'ringing' | 'accepted' | 'rejected' | 'missed' | 'ended';
     roomId?: string;
   }): Promise<string | null> {
-    if (!isSupabaseConfigured) {
-      console.warn('Supabase client is not configured for call record.');
-      return null;
-    }
-
-    const roomId = params.roomId || `room_${params.caller_id.slice(0, 8)}_${params.receiver_id.slice(0, 8)}`;
-
-    console.log('Call record created');
-    console.log('caller_id:', params.caller_id);
-    console.log('receiver_id:', params.receiver_id);
-    console.log('room_id:', roomId);
-
-    try {
-      const payload: Record<string, any> = {
-        caller_id: params.caller_id,
-        receiver_id: params.receiver_id,
-        callee_id: params.receiver_id,
-        room_id: roomId,
-        channel_id: roomId,
-        type: params.type,
-        call_type: params.type,
-        status: params.status,
-        started_at: new Date().toISOString(),
-        created_at: new Date().toISOString()
-      };
-
-      if (params.id) {
-        payload.id = params.id;
-      }
-
-      const { data, error } = await supabase.from('calls').upsert(payload).select('id').single();
-
-      if (error) {
-        console.error('Call insert failed:', error.message);
-        diagnosticsManager.update({
-          currentCallId: params.id,
-          currentRoomId: roomId,
-          callStatus: 'Failed',
-          lastCallError: error.message
-        });
-        return params.id || null;
-      }
-
-      const createdId = data?.id || params.id || null;
-
-      diagnosticsManager.update({
-        currentCallId: createdId || undefined,
-        currentRoomId: roomId,
-        callStatus: 'Ringing'
-      });
-
-      return createdId;
-    } catch (err: any) {
-      console.error('Exception creating call record:', err?.message || err);
-      return params.id || null;
-    }
+    if (!isSupabaseConfigured) return null;
+    const conversationId = /^[0-9a-f-]{36}$/i.test(params.id || '') ? params.id! : crypto.randomUUID();
+    const roomName = params.roomId || params.id || `call_${Date.now()}`;
+    const payload = {
+      conversation_id: conversationId,
+      room_name: roomName,
+      caller_id: params.caller_id,
+      callee_id: params.receiver_id,
+      call_type: params.type,
+      type: params.type,
+      status: params.status,
+      started_at: new Date().toISOString()
+    };
+    const { error } = await supabase.from('calls').upsert(payload, { onConflict: 'conversation_id' });
+    if (error) { console.error('CALL_RECORD_ERROR', error, payload); return null; }
+    diagnosticsManager.update({ currentCallId: conversationId, currentRoomId: roomName, callStatus: 'Ringing' });
+    return conversationId;
   }
 
-  // Create real call row in Supabase
-  async createCall(
-    callerId: string,
-    receiverId: string,
-    type: 'audio' | 'video'
-  ): Promise<string | null> {
-    return this.createCallRecord({
-      caller_id: callerId,
-      receiver_id: receiverId,
-      type,
-      status: 'ringing'
-    });
+  async createCall(callerId: string, receiverId: string, type: 'audio' | 'video'): Promise<string | null> {
+    return this.createCallRecord({ caller_id: callerId, receiver_id: receiverId, type, status: 'ringing' });
   }
 
-  // Subscribe to Incoming Calls in Realtime
   subscribeIncomingCalls(
     currentUserId: string,
     callback: (call: { callId: string; callerId: string; type: 'audio' | 'video'; channelId: string; roomId: string } | null) => void
   ): () => void {
-    if (!isSupabaseConfigured) {
-      callback(null);
-      diagnosticsManager.update({ callsRealtimeStatus: 'Failed' });
-      return () => {};
-    }
-
-    const checkIncoming = async () => {
-      const { data, error } = await supabase
-        .from('calls')
-        .select('*')
-        .or(`receiver_id.eq.${currentUserId},callee_id.eq.${currentUserId}`)
-        .eq('status', 'ringing')
-        .order('started_at', { ascending: false })
-        .limit(1);
-
-      if (error) {
-        console.error('Error fetching incoming calls:', error.message);
-      } else if (data && data.length > 0) {
-        const c = data[0];
-        console.log('Incoming call detected');
-        console.log('caller_id:', c.caller_id);
-        console.log('receiver_id:', c.receiver_id || c.callee_id);
-        console.log('room_id:', c.room_id || c.channel_id || c.id);
-
-        diagnosticsManager.update({
-          currentCallId: c.id,
-          currentRoomId: c.room_id || c.channel_id || c.id,
-          callStatus: 'Ringing'
-        });
-
-        callback({
-          callId: c.id,
-          callerId: c.caller_id,
-          type: (c.type || c.call_type || 'video') as 'audio' | 'video',
-          channelId: c.channel_id || c.room_id || c.id,
-          roomId: c.room_id || c.channel_id || c.id
-        });
-      } else {
-        callback(null);
-      }
+    if (!isSupabaseConfigured) { callback(null); return () => {}; }
+    const fetchIncoming = async () => {
+      const { data, error } = await supabase.from('calls').select('*')
+        .eq('callee_id', currentUserId).eq('status', 'ringing')
+        .order('started_at', { ascending: false }).limit(1);
+      if (error) { console.error('INCOMING_CALL_FETCH_ERROR', error); return; }
+      const c = data?.[0];
+      callback(c ? {
+        callId: c.conversation_id,
+        callerId: c.caller_id,
+        type: (c.call_type || c.type || 'video') as 'audio' | 'video',
+        channelId: c.room_name,
+        roomId: c.room_name
+      } : null);
     };
-
-    checkIncoming();
-
-    console.log('Realtime channel created');
-    const channelName = `incoming_calls_${currentUserId}`;
-
-    const channel = supabase
-      .channel(channelName)
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'calls' },
-        (payload: any) => {
-          const rec = payload.new;
-          if (rec && (rec.receiver_id === currentUserId || rec.callee_id === currentUserId)) {
-            checkIncoming();
-          }
-        }
-      )
-      .subscribe((status, err) => {
-        if (status === 'SUBSCRIBED') {
-          console.log('SUBSCRIBED');
-          diagnosticsManager.update({ callsRealtimeStatus: 'SUBSCRIBED' });
-        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-          console.warn(`Incoming calls subscription notice (${status}):`, err || '');
-          diagnosticsManager.update({ callsRealtimeStatus: 'Failed' });
-        }
-      });
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    void fetchIncoming();
+    const channel = supabase.channel(`incoming_${currentUserId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'calls', filter: `callee_id=eq.${currentUserId}` }, fetchIncoming)
+      .subscribe();
+    return () => { void supabase.removeChannel(channel); };
   }
 
-  // Subscribe to specific Call Status updates
   subscribeCallStatus(callId: string, callback: (status: string) => void): () => void {
     if (!isSupabaseConfigured || !callId) return () => {};
-
-    const checkStatus = async () => {
-      const { data, error } = await supabase
-        .from('calls')
-        .select('*')
-        .eq('id', callId)
-        .single();
-
-      if (error) {
-        console.error('Fetch call status error:', error.message);
-      } else if (data?.status) {
-        diagnosticsManager.update({
-          currentCallId: callId,
-          currentRoomId: data.room_id || data.channel_id || callId,
-          callStatus: data.status.charAt(0).toUpperCase() + data.status.slice(1) as any
-        });
-        callback(data.status);
-      }
+    const fetchStatus = async () => {
+      const { data, error } = await supabase.from('calls').select('status,room_name')
+        .eq('conversation_id', callId).maybeSingle();
+      if (error) { console.error('CALL_STATUS_FETCH_ERROR', error); return; }
+      if (data?.status) callback(data.status);
     };
-
-    checkStatus();
-
-    const channel = supabase
-      .channel(`call_status_${callId}`)
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'calls', filter: `id=eq.${callId}` },
-        (payload: any) => {
-          if (payload.new?.status) {
-            console.log('Call status updated:', payload.new.status);
-            console.log('caller_id:', payload.new.caller_id);
-            console.log('receiver_id:', payload.new.receiver_id || payload.new.callee_id);
-            console.log('room_id:', payload.new.room_id || payload.new.channel_id);
-
-            diagnosticsManager.update({
-              currentCallId: callId,
-              currentRoomId: payload.new.room_id || payload.new.channel_id || callId,
-              callStatus: payload.new.status.charAt(0).toUpperCase() + payload.new.status.slice(1) as any
-            });
-
-            callback(payload.new.status);
-          }
-        }
-      )
-      .subscribe((status) => {
-        if (status === 'SUBSCRIBED') {
-          console.log('SUBSCRIBED');
-        }
-      });
-
-    const interval = setInterval(checkStatus, 2000);
-
-    return () => {
-      supabase.removeChannel(channel);
-      clearInterval(interval);
-    };
+    void fetchStatus();
+    const channel = supabase.channel(`call_status_${callId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'calls', filter: `conversation_id=eq.${callId}` }, (payload: any) => {
+        if (payload.new?.status) callback(payload.new.status);
+      }).subscribe();
+    return () => { void supabase.removeChannel(channel); };
   }
 
-  // Update Call Status
-  async updateCallStatus(callId: string, status: 'ringing' | 'accepted' | 'rejected' | 'missed' | 'ended' | 'failed', durationSec?: number): Promise<void> {
+  async updateCallStatus(callId: string, status: 'ringing' | 'accepted' | 'rejected' | 'missed' | 'ended' | 'failed', _durationSec?: number): Promise<void> {
     if (!isSupabaseConfigured || !callId) return;
-
-    try {
-      const updatePayload: Record<string, any> = { status };
-
-      if (status === 'accepted') {
-        updatePayload.answered_at = new Date().toISOString();
-      }
-
-      if (status === 'ended' || status === 'rejected' || status === 'missed' || status === 'failed') {
-        updatePayload.ended_at = new Date().toISOString();
-        if (typeof durationSec === 'number') {
-          updatePayload.duration_seconds = durationSec;
-          updatePayload.duration = durationSec;
-        }
-      }
-
-      await supabase.from('calls').update(updatePayload).eq('id', callId);
-
-      diagnosticsManager.update({
-        currentCallId: callId,
-        callStatus: status.charAt(0).toUpperCase() + status.slice(1) as any
-      });
-    } catch (err) {
-      console.warn('Failed to update call status in Supabase:', err);
-    }
+    const { error } = await supabase.from('calls').update({ status }).eq('conversation_id', callId);
+    if (error) console.error('CALL_STATUS_UPDATE_ERROR', error);
   }
 
   // --- USER STATUSES (24-Hour Disappearing Stories) ---
