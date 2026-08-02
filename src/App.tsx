@@ -240,8 +240,12 @@ function AppContent() {
 
     const activeCallId = callId || `call_${Date.now()}`;
 
-    // 2. Show outgoing ringing overlay
-    setOutgoingCall({ callId: activeCallId, callee: participant, type });
+    // 2. Show outgoing ringing overlay using the real database UUID
+    setOutgoingCall({
+      callId: activeCallId,
+      callee: participant,
+      type
+    });
 
     console.log('📱 [CallInitiated] Sending Zego Invitation to target:', {
       callId: activeCallId,
@@ -251,7 +255,7 @@ function AppContent() {
     });
 
     // 3. Trigger Zego invitation in background
-    zegoCallService.sendCallInvitation(participant, type);
+    await zegoCallService.sendCallInvitation(participant, type);
   };
 
   // Cancel outgoing call
