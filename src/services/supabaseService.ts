@@ -619,22 +619,35 @@ export class SupabaseService {
     roomId?: string;
   }): Promise<string | null> {
     if (!isSupabaseConfigured) return null;
-    const conversationId = /^[0-9a-f-]{36}$/i.test(params.id || '') ? params.id! : crypto.randomUUID();
-    const roomName = params.roomId || params.id || `call_${Date.now()}`;
+
+    const callId = params.id && /^[0-9a-f-]{36}$/i.test(params.id) ? params.id : crypto.randomUUID();
+    const roomName = params.roomId || `call_${Date.now()}`;
+
     const payload = {
-      conversation_id: conversationId,
+      id: callId,
+      conversation_id: callId,
       room_name: roomName,
       caller_id: params.caller_id,
       callee_id: params.receiver_id,
       call_type: params.type,
       type: params.type,
       status: params.status,
-      started_at: new Date().toISOString()
+      started_at: new Date().toISOString(),
     };
-    const { error } = await supabase.from('calls').upsert(payload, { onConflict: 'conversation_id' });
-    if (error) { console.error('CALL_RECORD_ERROR', error, payload); return null; }
-    diagnosticsManager.update({ currentCallId: conversationId, currentRoomId: roomName, callStatus: 'Ringing' });
-    return conversationId;
+
+    const { data, error } = await supabase
+      .from('calls')
+      .upsert(payload, { onConflict: 'id' })
+      .select('id')
+      .single();
+
+    if (error) {
+      console.error('CALL_RECORD_ERROR', error);
+      return null;
+    }
+
+    diagnosticsManager.update({ currentCallId: data.id, currentRoomId: roomName, callStatus: 'Ringing' });
+    return data.id;
   }
 
   async createCall(callerId: string, receiverId: string, type: 'audio' | 'video'): Promise<string | null> {
