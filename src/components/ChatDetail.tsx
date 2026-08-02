@@ -9,6 +9,7 @@ import { useLanguage } from '../i18n/LanguageContext';
 import { SUPPORTED_LANGUAGES } from '../types/i18n';
 import { sounds } from '../services/audioSynthesizer';
 import { supabaseService } from '../services/supabaseService';
+import { supabase } from '../lib/supabase';
 
 interface ChatDetailProps {
   currentUserId: string;
@@ -48,6 +49,8 @@ export const ChatDetail: React.FC<ChatDetailProps> = ({
   const [isUploading, setIsUploading] = useState(false);
   const [uploadStatusText, setUploadStatusText] = useState('');
   const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
+  const [isSending, setIsSending] = useState(false);
+  const [sendError, setSendError] = useState<string | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -173,16 +176,64 @@ export const ChatDetail: React.FC<ChatDetailProps> = ({
   };
 
   const handleSend = async () => {
-    if (!inputText.trim() || isUploading) return;
-    const textToSend = inputText.trim();
-    const success = await onSendMessage(textToSend, 'text', undefined, undefined, replyingTo || undefined);
-    if (success !== false) {
-      setInputText('');
-      setReplyingTo(null);
-      setShowEmojiPicker(false);
-      sounds.playMessageSentSound();
-    } else {
-      console.error('Failed to send text message to Supabase. Message retained in input box.');
+    console.log('SEND_BUTTON_CLICKED');
+    setSendError(null);
+
+    const trimmedMessage = inputText.trim();
+    if (!trimmedMessage) {
+      return;
+    }
+
+    const {
+      data: { session }
+    } = await supabase.auth.getSession();
+
+    const conversationId = supabaseService.getConversationId(currentUserId, participant.id);
+
+    console.log({
+      messageText: trimmedMessage,
+      currentUserId,
+      targetUserId: participant.id,
+      conversationId,
+      session
+    });
+
+    if (!session) {
+      const sessionErr = 'انتهت الجلسة، سجل الدخول مجددًا';
+      console.error(sessionErr);
+      setSendError(sessionErr);
+      return;
+    }
+
+    if (isUploading || isSending) return;
+
+    setIsSending(true);
+    try {
+      // Ensure conversation exists between currentUserId and target user
+      const convId = await supabaseService.ensureConversation(currentUserId, participant.id);
+      if (!convId) {
+        const convErr = 'فشل إنشاء أو تحديد رقم المحادثة';
+        console.error(convErr);
+        setSendError(convErr);
+        return;
+      }
+
+      const success = await onSendMessage(trimmedMessage, 'text', undefined, undefined, replyingTo || undefined);
+      if (success !== false) {
+        setInputText('');
+        setReplyingTo(null);
+        setShowEmojiPicker(false);
+        sounds.playMessageSentSound();
+      } else {
+        const sendFailErr = 'فشل إرسال الرسالة إلى قاعدة البيانات';
+        console.error(sendFailErr);
+        setSendError(sendFailErr);
+      }
+    } catch (err: any) {
+      console.error('Error in handleSend:', err);
+      setSendError(err?.message || 'حدث خطأ أثناء إرسال الرسالة');
+    } finally {
+      setIsSending(false);
     }
   };
 
@@ -562,12 +613,27 @@ export const ChatDetail: React.FC<ChatDetailProps> = ({
         </div>
       )}
 
+      {/* Send Error Banner */}
+      {sendError && (
+        <div className="px-3.5 py-2 bg-red-950/90 border-t border-red-800 text-red-200 flex items-center justify-between text-xs animate-pulse">
+          <span className="font-medium">{sendError}</span>
+          <button
+            type="button"
+            onClick={() => setSendError(null)}
+            className="p-1 rounded-lg text-red-300 hover:text-white hover:bg-red-900/50 cursor-pointer"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
       {/* Message Input Controls */}
       <div className="p-2.5 bg-slate-900 border-t border-slate-800 flex items-center gap-1.5">
         {/* Emoji Button */}
         <button
+          type="button"
           onClick={() => setShowEmojiPicker(!showEmojiPicker)}
-          disabled={isUploading}
+          disabled={isUploading || isSending}
           className="p-2.5 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-300 cursor-pointer transition-all disabled:opacity-50"
           title="إيموجي"
         >
@@ -577,23 +643,23 @@ export const ChatDetail: React.FC<ChatDetailProps> = ({
         {/* Photo Attachment */}
         <label
           className={`p-2.5 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-300 cursor-pointer transition-all ${
-            isUploading ? 'opacity-50 pointer-events-none' : ''
+            isUploading || isSending ? 'opacity-50 pointer-events-none' : ''
           }`}
           title="إرسال صورة"
         >
           <Image className="w-4 h-4 text-cyan-400" />
-          <input type="file" accept="image/*" className="hidden" onChange={handleImageUpload} disabled={isUploading} />
+          <input type="file" accept="image/*" className="hidden" onChange={handleImageUpload} disabled={isUploading || isSending} />
         </label>
 
         {/* File Attachment */}
         <label
           className={`p-2.5 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-300 cursor-pointer transition-all ${
-            isUploading ? 'opacity-50 pointer-events-none' : ''
+            isUploading || isSending ? 'opacity-50 pointer-events-none' : ''
           }`}
           title="إرسال ملف"
         >
           <Paperclip className="w-4 h-4 text-teal-400" />
-          <input type="file" className="hidden" onChange={handleFileUpload} disabled={isUploading} />
+          <input type="file" className="hidden" onChange={handleFileUpload} disabled={isUploading || isSending} />
         </label>
 
         {/* Text Input */}
@@ -601,16 +667,22 @@ export const ChatDetail: React.FC<ChatDetailProps> = ({
           type="text"
           value={inputText}
           onChange={(e) => setInputText(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && handleSend()}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+              e.preventDefault();
+              handleSend();
+            }
+          }}
           placeholder={t('typeMessage')}
-          disabled={isUploading}
+          disabled={isUploading || isSending}
           className="flex-1 bg-slate-800 rounded-2xl px-3.5 py-2.5 text-xs text-slate-100 placeholder-slate-400 border border-slate-700/80 focus:border-cyan-500 focus:outline-none transition-all disabled:opacity-50"
         />
 
         {/* Mic Voice Button */}
         <button
+          type="button"
           onClick={isRecording ? stopRecording : startRecording}
-          disabled={isUploading}
+          disabled={isUploading || isSending}
           className={`p-2.5 rounded-2xl transition-all cursor-pointer disabled:opacity-50 ${
             isRecording
               ? 'bg-red-600 text-white animate-bounce'
@@ -623,12 +695,17 @@ export const ChatDetail: React.FC<ChatDetailProps> = ({
 
         {/* Send Button */}
         <button
+          type="button"
           onClick={handleSend}
-          disabled={!inputText.trim() || isUploading}
-          className="p-2.5 rounded-2xl bg-gradient-to-tr from-cyan-600 to-teal-500 disabled:opacity-40 text-slate-950 font-bold hover:brightness-110 active:scale-95 transition-all cursor-pointer"
+          disabled={!inputText.trim() || isUploading || isSending}
+          className="p-2.5 rounded-2xl bg-gradient-to-tr from-cyan-600 to-teal-500 disabled:opacity-40 text-slate-950 font-bold hover:brightness-110 active:scale-95 transition-all cursor-pointer flex items-center justify-center shrink-0"
           title="إرسال"
         >
-          <Send className={`w-4 h-4 ${direction === 'rtl' ? 'rotate-180' : ''}`} />
+          {isSending ? (
+            <Loader2 className="w-4 h-4 animate-spin text-slate-950" />
+          ) : (
+            <Send className={`w-4 h-4 ${direction === 'rtl' ? 'rotate-180' : ''}`} />
+          )}
         </button>
       </div>
     </div>

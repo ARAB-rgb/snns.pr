@@ -770,22 +770,29 @@ export class SupabaseService {
 
     const lastMsgText = type === 'image' ? '📷 صورة' : type === 'audio' ? '🎤 تسجيل صوتي' : type === 'file' ? '📁 ملف' : text;
 
+    const payload = {
+      conversation_id: convId,
+      sender_id: senderId,
+      receiver_id: receiverId,
+      text,
+      type,
+      media_url: mediaUrl || null,
+      file_name: fileName || null,
+      reply_to: replyTo || null,
+      is_read: false,
+      is_delivered: true
+    };
+
+    console.log('MESSAGE_INSERT_PAYLOAD', payload);
+
     try {
-      const { data, error: msgError } = await supabase.from('messages').insert({
-        conversation_id: convId,
-        sender_id: senderId,
-        receiver_id: receiverId,
-        text,
-        type,
-        media_url: mediaUrl || null,
-        file_name: fileName || null,
-        reply_to: replyTo || null,
-        is_read: false,
-        is_delivered: true
-      }).select().single();
+      const { data, error: msgError } = await supabase.from('messages').insert(payload).select().single();
+
+      console.log('MESSAGE_INSERT_DATA', data);
+      console.error('MESSAGE_INSERT_ERROR', msgError);
 
       if (msgError) {
-        console.error('Message insert failed', msgError.message || msgError);
+        console.error('Message insert failed:', msgError.message || msgError);
         console.log('conversation_id:', convId);
         console.log('sender_id:', senderId);
         console.log('receiver_id:', receiverId);
@@ -821,6 +828,7 @@ export class SupabaseService {
 
       return true;
     } catch (err: any) {
+      console.error('MESSAGE_INSERT_ERROR', err);
       console.error('Message insert failed', err?.message || err);
       console.log('conversation_id:', convId);
       console.log('sender_id:', senderId);
