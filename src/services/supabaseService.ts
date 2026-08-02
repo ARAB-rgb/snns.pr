@@ -120,10 +120,8 @@ export class SupabaseService {
         id: sbUser.id,
         user_id: sbUser.id,
         full_name: fullName,
-        name: fullName,
         email: sbUser.email || '',
         avatar_url: avatarUrl,
-        avatar: avatarUrl,
         language: 'ar',
         profile_visibility: 'public',
         is_online: true,
@@ -283,9 +281,9 @@ export class SupabaseService {
       const payload: Record<string, any> = {
         id: formattedUuid,
         user_id: user.id,
-        name: user.name,
+        full_name: user.name,
         email: user.email || '',
-        avatar: user.avatar || '',
+        avatar_url: user.avatar || '',
         phone: user.phone || '',
         language: user.language || 'ar',
         is_online: true,
@@ -378,8 +376,8 @@ export class SupabaseService {
 
             return {
               id: profileUserId,
-              name: p.full_name || p.name || p.email?.split('@')[0] || 'مستخدم',
-              avatar: p.avatar_url || p.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
+              name: p.full_name || p.email?.split('@')[0] || 'مستخدم',
+              avatar: p.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
               email: p.email,
               phone: p.phone,
               language: p.language || 'ar',
@@ -745,6 +743,7 @@ export class SupabaseService {
               lastReceivedStatus: 'Success',
               lastConversationId: payload.new?.conversation_id || conversationId,
               lastSenderId: payload.new?.sender_id,
+              lastReceiverId: undefined
             });
 
             fetchMessages();
@@ -803,9 +802,9 @@ export class SupabaseService {
       sender_id: senderId,
       body: text,
       type,
-      media_url: mediaUrl ?? null,
-      file_name: fileName ?? null,
-      reply_to: replyTo?.id ?? null,
+      media_url: mediaUrl || null,
+      file_name: fileName || null,
+      reply_to: replyTo?.id || null,
       is_read: false,
       is_delivered: true
     };
