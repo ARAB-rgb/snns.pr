@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import {
   ArrowLeft, Phone, Video, Send, Mic, Image, Paperclip,
   Smile, Trash2, Reply, X, Play, Pause, CheckCheck,
-  Sparkles, FileText, Download
+  Sparkles, FileText, Download, Loader2, Maximize2
 } from 'lucide-react';
 import { User, Message } from '../types';
 import { useLanguage } from '../i18n/LanguageContext';
@@ -45,21 +45,74 @@ export const ChatDetail: React.FC<ChatDetailProps> = ({
   const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [replyingTo, setReplyingTo] = useState<{ id: string; text: string; senderName?: string } | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadStatusText, setUploadStatusText] = useState('');
+  const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const timerRef = useRef<number | null>(null);
+  const audioPlayerRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // Voice recording logic using Web MediaRecorder API
+  // Clean up audio player on unmount
+  useEffect(() => {
+    return () => {
+      if (audioPlayerRef.current) {
+        audioPlayerRef.current.pause();
+        audioPlayerRef.current = null;
+      }
+    };
+  }, []);
+
+  // Real Audio playback for voice messages using HTML5 Audio
+  const togglePlayAudio = (msgId: string, url?: string) => {
+    if (!url || url === '#') return;
+
+    if (playingAudioId === msgId) {
+      if (audioPlayerRef.current) {
+        audioPlayerRef.current.pause();
+      }
+      setPlayingAudioId(null);
+    } else {
+      if (audioPlayerRef.current) {
+        audioPlayerRef.current.pause();
+      }
+      const newAudio = new Audio(url);
+      audioPlayerRef.current = newAudio;
+      setPlayingAudioId(msgId);
+
+      newAudio.onended = () => {
+        setPlayingAudioId(null);
+      };
+
+      newAudio.onerror = (e) => {
+        console.warn('Audio playback error:', e);
+        setPlayingAudioId(null);
+      };
+
+      newAudio.play().catch((err) => {
+        console.warn('Playback failed:', err);
+        setPlayingAudioId(null);
+      });
+    }
+  };
+
+  // Voice recording logic using Web MediaRecorder API & Supabase Storage
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new MediaRecorder(stream);
+      const mimeType = MediaRecorder.isTypeSupported('audio/webm')
+        ? 'audio/webm'
+        : MediaRecorder.isTypeSupported('audio/mp4')
+        ? 'audio/mp4'
+        : 'audio/ogg';
+
+      const recorder = new MediaRecorder(stream, { mimeType });
       mediaRecorderRef.current = recorder;
       audioChunksRef.current = [];
 
@@ -70,21 +123,33 @@ export const ChatDetail: React.FC<ChatDetailProps> = ({
       };
 
       recorder.onstop = async () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-        const uploadRes = await supabaseService.uploadAttachment(audioBlob, `voice_${Date.now()}.webm`, 'audio/webm');
-        if (uploadRes) {
-          const success = await onSendMessage('تسجيل صوتي', 'audio', uploadRes.url, 'voice_note.webm', replyingTo || undefined);
-          if (success !== false) {
-            setReplyingTo(null);
-            sounds.playMessageSentSound();
+        setIsUploading(true);
+        setUploadStatusText('جاري رفع التسجيل الصوتي إلى السحابة...');
+        try {
+          const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
+          const ext = mimeType.includes('mp4') ? 'm4a' : mimeType.includes('ogg') ? 'ogg' : 'webm';
+          const fileName = `voice_${Date.now()}.${ext}`;
+
+          const uploadRes = await supabaseService.uploadAttachment(audioBlob, fileName, mimeType);
+          if (uploadRes?.url) {
+            const success = await onSendMessage('تسجيل صوتي', 'audio', uploadRes.url, fileName, replyingTo || undefined);
+            if (success !== false) {
+              setReplyingTo(null);
+              sounds.playMessageSentSound();
+            }
+          } else {
+            console.error('Failed to upload voice recording to Supabase Storage');
           }
-        } else {
-          console.error('Failed to upload voice recording to Supabase Storage');
+        } catch (err) {
+          console.error('Voice note upload exception:', err);
+        } finally {
+          setIsUploading(false);
+          setUploadStatusText('');
+          stream.getTracks().forEach((track) => track.stop());
         }
-        stream.getTracks().forEach((track) => track.stop());
       };
 
-      recorder.start();
+      recorder.start(200);
       setIsRecording(true);
       setRecordingSeconds(0);
 
@@ -93,9 +158,6 @@ export const ChatDetail: React.FC<ChatDetailProps> = ({
       }, 1000);
     } catch (err) {
       console.warn('Mic access error for voice note:', err);
-      onSendMessage('تسجيل صوتي', 'audio', '#', undefined, replyingTo || undefined);
-      setReplyingTo(null);
-      sounds.playMessageSentSound();
     }
   };
 
@@ -111,7 +173,7 @@ export const ChatDetail: React.FC<ChatDetailProps> = ({
   };
 
   const handleSend = async () => {
-    if (!inputText.trim()) return;
+    if (!inputText.trim() || isUploading) return;
     const textToSend = inputText.trim();
     const success = await onSendMessage(textToSend, 'text', undefined, undefined, replyingTo || undefined);
     if (success !== false) {
@@ -133,9 +195,13 @@ export const ChatDetail: React.FC<ChatDetailProps> = ({
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
+    if (!file) return;
+
+    setIsUploading(true);
+    setUploadStatusText('جاري رفع الصورة إلى التخزين السحابي...');
+    try {
       const uploadRes = await supabaseService.uploadAttachment(file, file.name, file.type);
-      if (uploadRes) {
+      if (uploadRes?.url) {
         const success = await onSendMessage('صورة', 'image', uploadRes.url, file.name, replyingTo || undefined);
         if (success !== false) {
           setReplyingTo(null);
@@ -144,14 +210,24 @@ export const ChatDetail: React.FC<ChatDetailProps> = ({
       } else {
         console.error('Supabase image upload failed. Image message not sent.');
       }
+    } catch (err) {
+      console.error('Image upload exception:', err);
+    } finally {
+      setIsUploading(false);
+      setUploadStatusText('');
+      e.target.value = '';
     }
   };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
+    if (!file) return;
+
+    setIsUploading(true);
+    setUploadStatusText('جاري رفع الملف إلى التخزين السحابي...');
+    try {
       const uploadRes = await supabaseService.uploadAttachment(file, file.name, file.type);
-      if (uploadRes) {
+      if (uploadRes?.url) {
         const success = await onSendMessage(`ملف: ${file.name}`, 'file', uploadRes.url, file.name, replyingTo || undefined);
         if (success !== false) {
           setReplyingTo(null);
@@ -160,6 +236,12 @@ export const ChatDetail: React.FC<ChatDetailProps> = ({
       } else {
         console.error('Supabase file upload failed. File message not sent.');
       }
+    } catch (err) {
+      console.error('File upload exception:', err);
+    } finally {
+      setIsUploading(false);
+      setUploadStatusText('');
+      e.target.value = '';
     }
   };
 
@@ -171,6 +253,39 @@ export const ChatDetail: React.FC<ChatDetailProps> = ({
 
   return (
     <div className="flex-1 flex flex-col bg-slate-950 h-full overflow-hidden relative">
+      {/* Image Lightbox Modal */}
+      {previewImageUrl && (
+        <div
+          className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-4 backdrop-blur-sm"
+          onClick={() => setPreviewImageUrl(null)}
+        >
+          <div className="relative max-w-4xl max-h-[90vh] flex flex-col items-center">
+            <button
+              onClick={() => setPreviewImageUrl(null)}
+              className="absolute -top-10 right-0 p-2 rounded-full bg-slate-800 text-white hover:bg-slate-700 cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+            <img
+              src={previewImageUrl}
+              alt="Expanded view"
+              className="max-w-full max-h-[80vh] rounded-2xl object-contain shadow-2xl border border-slate-800"
+            />
+            <a
+              href={previewImageUrl}
+              download="image.jpg"
+              target="_blank"
+              rel="noreferrer"
+              onClick={(e) => e.stopPropagation()}
+              className="mt-4 px-4 py-2 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold flex items-center gap-2 cursor-pointer transition-all"
+            >
+              <Download className="w-4 h-4" />
+              <span>تنزيل الصورة</span>
+            </a>
+          </div>
+        </div>
+      )}
+
       {/* Top Header */}
       <div className="px-3 py-2.5 bg-slate-900 border-b border-slate-800 flex items-center justify-between z-10">
         <div className="flex items-center gap-2 min-w-0">
@@ -252,13 +367,23 @@ export const ChatDetail: React.FC<ChatDetailProps> = ({
                   </div>
                 )}
 
-                {/* Media Image */}
+                {/* Media Image with Click-to-Expand Lightbox */}
                 {msg.type === 'image' && msg.mediaUrl && (
-                  <img
-                    src={msg.mediaUrl}
-                    alt="attachment"
-                    className="max-w-full max-h-52 rounded-xl object-cover mb-2 border border-black/20"
-                  />
+                  <div className="relative group/img cursor-pointer overflow-hidden rounded-xl mb-2 border border-black/20">
+                    <img
+                      src={msg.mediaUrl}
+                      alt="attachment"
+                      onClick={() => setPreviewImageUrl(msg.mediaUrl || null)}
+                      className="max-w-full max-h-60 rounded-xl object-cover hover:scale-105 transition-transform duration-200"
+                    />
+                    <button
+                      onClick={() => setPreviewImageUrl(msg.mediaUrl || null)}
+                      className="absolute top-2 right-2 p-1.5 rounded-lg bg-black/60 text-white opacity-0 group-hover/img:opacity-100 transition-opacity"
+                      title="تكبير الصورة"
+                    >
+                      <Maximize2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
                 )}
 
                 {/* File Attachment */}
@@ -268,7 +393,7 @@ export const ChatDetail: React.FC<ChatDetailProps> = ({
                     download={msg.fileName || 'file'}
                     target="_blank"
                     rel="noreferrer"
-                    className="flex items-center gap-2 p-2 rounded-xl bg-black/20 hover:bg-black/30 border border-white/10 text-white mb-1 transition-all"
+                    className="flex items-center gap-2 p-2.5 rounded-xl bg-black/20 hover:bg-black/30 border border-white/10 text-white mb-1 transition-all"
                   >
                     <FileText className="w-5 h-5 text-cyan-300 shrink-0" />
                     <div className="min-w-0 flex-1">
@@ -279,32 +404,37 @@ export const ChatDetail: React.FC<ChatDetailProps> = ({
                   </a>
                 )}
 
-                {/* Voice Note Audio */}
+                {/* Voice Note Audio Player */}
                 {msg.type === 'audio' && (
-                  <div className="flex items-center gap-2.5 py-1">
+                  <div className="flex items-center gap-3 py-1 min-w-[200px]">
                     <button
-                      onClick={() => setPlayingAudioId(playingAudioId === msg.id ? null : msg.id)}
-                      className="p-2 rounded-full bg-white/20 hover:bg-white/30 text-white cursor-pointer"
+                      onClick={() => togglePlayAudio(msg.id, msg.mediaUrl)}
+                      className="p-2.5 rounded-full bg-white/20 hover:bg-white/30 text-white transition-all cursor-pointer shrink-0"
+                      title={playingAudioId === msg.id ? 'إيقاف' : 'تشغيل الصوت'}
                     >
                       {playingAudioId === msg.id ? (
-                        <Pause className="w-3.5 h-3.5" />
+                        <Pause className="w-4 h-4" />
                       ) : (
-                        <Play className="w-3.5 h-3.5 ml-0.5" />
+                        <Play className="w-4 h-4 ml-0.5" />
                       )}
                     </button>
-                    <div className="flex-1">
-                      <div className="flex items-center gap-0.5 h-4">
-                        {[40, 70, 30, 90, 50, 80, 40, 60, 30].map((h, i) => (
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-1 h-5 my-1">
+                        {[40, 70, 30, 90, 50, 80, 40, 60, 30, 80, 50, 70, 40, 60].map((h, i) => (
                           <div
                             key={i}
                             style={{ height: `${h}%` }}
-                            className={`w-1 rounded-full ${
-                              playingAudioId === msg.id ? 'bg-cyan-300 animate-pulse' : 'bg-white/50'
+                            className={`w-1 rounded-full transition-all ${
+                              playingAudioId === msg.id
+                                ? 'bg-cyan-300 animate-pulse'
+                                : 'bg-white/40'
                             }`}
                           />
                         ))}
                       </div>
-                      <span className="text-[9px] opacity-80 mt-0.5 block">تسجيل صوتي</span>
+                      <span className="text-[10px] opacity-90 block font-medium">
+                        {playingAudioId === msg.id ? 'جاري التشغيل...' : 'تسجيل صوتي'}
+                      </span>
                     </div>
                   </div>
                 )}
@@ -347,7 +477,7 @@ export const ChatDetail: React.FC<ChatDetailProps> = ({
                     onClick={() =>
                       setReplyingTo({
                         id: msg.id,
-                        text: msg.type === 'text' ? msg.text : msg.type === 'image' ? '📷 صورة' : '📁 ملف',
+                        text: msg.type === 'text' ? msg.text : msg.type === 'image' ? '📷 صورة' : msg.type === 'audio' ? '🎤 تسجيل صوتي' : '📁 ملف',
                         senderName: isMe ? 'أنت' : participant.name
                       })
                     }
@@ -373,6 +503,14 @@ export const ChatDetail: React.FC<ChatDetailProps> = ({
         })}
         <div ref={messagesEndRef} />
       </div>
+
+      {/* Uploading Status Banner */}
+      {isUploading && (
+        <div className="px-4 py-2 bg-slate-900 border-t border-slate-800 text-cyan-300 flex items-center gap-2 text-xs">
+          <Loader2 className="w-4 h-4 animate-spin text-cyan-400" />
+          <span>{uploadStatusText}</span>
+        </div>
+      )}
 
       {/* Reply Banner */}
       {replyingTo && (
@@ -429,22 +567,33 @@ export const ChatDetail: React.FC<ChatDetailProps> = ({
         {/* Emoji Button */}
         <button
           onClick={() => setShowEmojiPicker(!showEmojiPicker)}
-          className="p-2.5 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-300 cursor-pointer transition-all"
+          disabled={isUploading}
+          className="p-2.5 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-300 cursor-pointer transition-all disabled:opacity-50"
           title="إيموجي"
         >
           <Smile className="w-4 h-4 text-amber-400" />
         </button>
 
         {/* Photo Attachment */}
-        <label className="p-2.5 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-300 cursor-pointer transition-all" title="إرسال صورة">
+        <label
+          className={`p-2.5 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-300 cursor-pointer transition-all ${
+            isUploading ? 'opacity-50 pointer-events-none' : ''
+          }`}
+          title="إرسال صورة"
+        >
           <Image className="w-4 h-4 text-cyan-400" />
-          <input type="file" accept="image/*" className="hidden" onChange={handleImageUpload} />
+          <input type="file" accept="image/*" className="hidden" onChange={handleImageUpload} disabled={isUploading} />
         </label>
 
         {/* File Attachment */}
-        <label className="p-2.5 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-300 cursor-pointer transition-all" title="إرسال ملف">
+        <label
+          className={`p-2.5 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-300 cursor-pointer transition-all ${
+            isUploading ? 'opacity-50 pointer-events-none' : ''
+          }`}
+          title="إرسال ملف"
+        >
           <Paperclip className="w-4 h-4 text-teal-400" />
-          <input type="file" className="hidden" onChange={handleFileUpload} />
+          <input type="file" className="hidden" onChange={handleFileUpload} disabled={isUploading} />
         </label>
 
         {/* Text Input */}
@@ -454,13 +603,15 @@ export const ChatDetail: React.FC<ChatDetailProps> = ({
           onChange={(e) => setInputText(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && handleSend()}
           placeholder={t('typeMessage')}
-          className="flex-1 bg-slate-800 rounded-2xl px-3.5 py-2.5 text-xs text-slate-100 placeholder-slate-400 border border-slate-700/80 focus:border-cyan-500 focus:outline-none transition-all"
+          disabled={isUploading}
+          className="flex-1 bg-slate-800 rounded-2xl px-3.5 py-2.5 text-xs text-slate-100 placeholder-slate-400 border border-slate-700/80 focus:border-cyan-500 focus:outline-none transition-all disabled:opacity-50"
         />
 
         {/* Mic Voice Button */}
         <button
           onClick={isRecording ? stopRecording : startRecording}
-          className={`p-2.5 rounded-2xl transition-all cursor-pointer ${
+          disabled={isUploading}
+          className={`p-2.5 rounded-2xl transition-all cursor-pointer disabled:opacity-50 ${
             isRecording
               ? 'bg-red-600 text-white animate-bounce'
               : 'bg-slate-800 hover:bg-slate-700 text-slate-300'
@@ -473,7 +624,7 @@ export const ChatDetail: React.FC<ChatDetailProps> = ({
         {/* Send Button */}
         <button
           onClick={handleSend}
-          disabled={!inputText.trim()}
+          disabled={!inputText.trim() || isUploading}
           className="p-2.5 rounded-2xl bg-gradient-to-tr from-cyan-600 to-teal-500 disabled:opacity-40 text-slate-950 font-bold hover:brightness-110 active:scale-95 transition-all cursor-pointer"
           title="إرسال"
         >
@@ -483,3 +634,4 @@ export const ChatDetail: React.FC<ChatDetailProps> = ({
     </div>
   );
 };
+
