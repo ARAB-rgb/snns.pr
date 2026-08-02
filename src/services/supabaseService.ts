@@ -596,12 +596,12 @@ export class SupabaseService {
         .order('started_at', { ascending: false });
       if (error) { console.error('CALL_LOGS_FETCH_ERROR', error); return; }
       callback((data || []).map((c: any) => ({
-        id: c.conversation_id,
+        id: c.id,
         participantId: c.caller_id === currentUserId ? c.callee_id : c.caller_id,
         type: (c.call_type || c.type || 'video') as 'audio' | 'video',
         direction: c.caller_id === currentUserId ? 'outgoing' : (c.status === 'missed' || c.status === 'rejected' ? 'missed' : 'incoming'),
         timestamp: new Date(c.started_at || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        zegoRoomId: c.room_name || c.conversation_id
+        zegoRoomId: c.room_name || c.id
       })));
     };
     void fetchCalls();
@@ -618,10 +618,18 @@ export class SupabaseService {
     status: 'ringing' | 'accepted' | 'rejected' | 'missed' | 'ended';
     roomId?: string;
   }): Promise<string | null> {
-    if (!isSupabaseConfigured) return null;
+    if (!isSupabaseConfigured) {
+      console.error('CALL_RECORD_ERROR: Supabase غير مهيأ');
+      return null;
+    }
 
-    const callId = params.id && /^[0-9a-f-]{36}$/i.test(params.id) ? params.id : crypto.randomUUID();
-    const roomName = params.roomId || `call_${Date.now()}`;
+    if (!params.caller_id || !params.receiver_id) {
+      console.error('CALL_RECORD_ERROR: معرف المتصل أو المستقبل غير موجود');
+      return null;
+    }
+
+    const callId = (params.id && /^[0-9a-f-]{36}$/i.test(params.id)) ? params.id : crypto.randomUUID();
+    const roomName = params.roomId?.trim() || `call_${Date.now()}_${callId.slice(0, 8)}`;
 
     const payload = {
       id: callId,
@@ -632,74 +640,221 @@ export class SupabaseService {
       call_type: params.type,
       type: params.type,
       status: params.status,
-      started_at: new Date().toISOString(),
+      started_at: new Date().toISOString()
     };
+
+    console.log('CALL_RECORD_PAYLOAD', payload);
 
     const { data, error } = await supabase
       .from('calls')
-      .upsert(payload, { onConflict: 'id' })
-      .select('id')
+      .insert(payload)
+      .select('id, room_name, status')
       .single();
 
     if (error) {
-      console.error('CALL_RECORD_ERROR', error);
+      console.error('CALL_RECORD_ERROR', error, payload);
+      diagnosticsManager.update({
+        callStatus: 'Failed',
+        lastCallError: error.message
+      });
       return null;
     }
 
-    diagnosticsManager.update({ currentCallId: data.id, currentRoomId: roomName, callStatus: 'Ringing' });
+    if (!data?.id) {
+      console.error('CALL_RECORD_ERROR: لم يرجع Supabase معرف المكالمة');
+      return null;
+    }
+
+    diagnosticsManager.update({
+      currentCallId: data.id,
+      currentRoomId: data.room_name || roomName,
+      callStatus: 'Ringing'
+    });
+
+    console.log('CALL_RECORD_CREATED', {
+      callId: data.id,
+      roomName: data.room_name || roomName
+    });
+
     return data.id;
   }
 
-  async createCall(callerId: string, receiverId: string, type: 'audio' | 'video'): Promise<string | null> {
-    return this.createCallRecord({ caller_id: callerId, receiver_id: receiverId, type, status: 'ringing' });
+  async createCall(
+    callerId: string,
+    receiverId: string,
+    type: 'audio' | 'video'
+  ): Promise<string | null> {
+    return this.createCallRecord({
+      caller_id: callerId,
+      receiver_id: receiverId,
+      type,
+      status: 'ringing'
+    });
   }
 
   subscribeIncomingCalls(
     currentUserId: string,
-    callback: (call: { callId: string; callerId: string; type: 'audio' | 'video'; channelId: string; roomId: string } | null) => void
+    callback: (call: {
+      callId: string;
+      callerId: string;
+      type: 'audio' | 'video';
+      channelId: string;
+      roomId: string;
+    } | null) => void
   ): () => void {
-    if (!isSupabaseConfigured) { callback(null); return () => {}; }
+    if (!isSupabaseConfigured || !currentUserId) {
+      callback(null);
+      return () => {};
+    }
+
     const fetchIncoming = async () => {
-      const { data, error } = await supabase.from('calls').select('*')
-        .eq('callee_id', currentUserId).eq('status', 'ringing')
-        .order('started_at', { ascending: false }).limit(1);
-      if (error) { console.error('INCOMING_CALL_FETCH_ERROR', error); return; }
-      const c = data?.[0];
-      callback(c ? {
-        callId: c.conversation_id,
-        callerId: c.caller_id,
-        type: (c.call_type || c.type || 'video') as 'audio' | 'video',
-        channelId: c.room_name,
-        roomId: c.room_name
-      } : null);
+      const { data, error } = await supabase
+        .from('calls')
+        .select('id, conversation_id, room_name, caller_id, callee_id, call_type, type, status, started_at')
+        .eq('callee_id', currentUserId)
+        .eq('status', 'ringing')
+        .order('started_at', { ascending: false })
+        .limit(1);
+
+      if (error) {
+        console.error('INCOMING_CALL_FETCH_ERROR', error);
+        return;
+      }
+
+      const callRow = data?.[0];
+      if (!callRow) {
+        callback(null);
+        return;
+      }
+
+      callback({
+        callId: callRow.id,
+        callerId: callRow.caller_id,
+        type: (callRow.call_type || callRow.type || 'video') as 'audio' | 'video',
+        channelId: callRow.room_name,
+        roomId: callRow.room_name
+      });
     };
+
     void fetchIncoming();
-    const channel = supabase.channel(`incoming_${currentUserId}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'calls', filter: `callee_id=eq.${currentUserId}` }, fetchIncoming)
-      .subscribe();
-    return () => { void supabase.removeChannel(channel); };
-  }
 
-  subscribeCallStatus(callId: string, callback: (status: string) => void): () => void {
-    if (!isSupabaseConfigured || !callId) return () => {};
-    const fetchStatus = async () => {
-      const { data, error } = await supabase.from('calls').select('status,room_name')
-        .eq('conversation_id', callId).maybeSingle();
-      if (error) { console.error('CALL_STATUS_FETCH_ERROR', error); return; }
-      if (data?.status) callback(data.status);
+    const channel = supabase
+      .channel(`incoming_calls_${currentUserId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'calls',
+          filter: `callee_id=eq.${currentUserId}`
+        },
+        () => {
+          void fetchIncoming();
+        }
+      )
+      .subscribe((status) => {
+        diagnosticsManager.update({
+          callsRealtimeStatus: status === 'SUBSCRIBED' ? 'SUBSCRIBED' : 'Connecting'
+        });
+      });
+
+    return () => {
+      void supabase.removeChannel(channel);
     };
-    void fetchStatus();
-    const channel = supabase.channel(`call_status_${callId}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'calls', filter: `conversation_id=eq.${callId}` }, (payload: any) => {
-        if (payload.new?.status) callback(payload.new.status);
-      }).subscribe();
-    return () => { void supabase.removeChannel(channel); };
   }
 
-  async updateCallStatus(callId: string, status: 'ringing' | 'accepted' | 'rejected' | 'missed' | 'ended' | 'failed', _durationSec?: number): Promise<void> {
+  subscribeCallStatus(
+    callId: string,
+    callback: (status: string) => void
+  ): () => void {
+    if (!isSupabaseConfigured || !callId) return () => {};
+
+    const fetchStatus = async () => {
+      const { data, error } = await supabase
+        .from('calls')
+        .select('id, status, room_name')
+        .eq('id', callId)
+        .maybeSingle();
+
+      if (error) {
+        console.error('CALL_STATUS_FETCH_ERROR', error);
+        return;
+      }
+
+      if (data?.status) {
+        callback(data.status);
+        diagnosticsManager.update({
+          currentCallId: data.id,
+          currentRoomId: data.room_name || undefined,
+          callStatus: this.mapDatabaseCallStatus(data.status)
+        });
+      }
+    };
+
+    void fetchStatus();
+
+    const channel = supabase
+      .channel(`call_status_${callId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'calls',
+          filter: `id=eq.${callId}`
+        },
+        (payload: any) => {
+          const status = payload.new?.status;
+          if (status) {
+            callback(status);
+            diagnosticsManager.update({
+              currentCallId: payload.new?.id || callId,
+              currentRoomId: payload.new?.room_name || undefined,
+              callStatus: this.mapDatabaseCallStatus(status)
+            });
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }
+
+  async updateCallStatus(
+    callId: string,
+    status: 'ringing' | 'accepted' | 'rejected' | 'missed' | 'ended' | 'failed',
+    _durationSec?: number
+  ): Promise<void> {
     if (!isSupabaseConfigured || !callId) return;
-    const { error } = await supabase.from('calls').update({ status }).eq('conversation_id', callId);
-    if (error) console.error('CALL_STATUS_UPDATE_ERROR', error);
+
+    const { error } = await supabase
+      .from('calls')
+      .update({ status })
+      .eq('id', callId);
+
+    if (error) {
+      console.error('CALL_STATUS_UPDATE_ERROR', error, { callId, status });
+      return;
+    }
+
+    diagnosticsManager.update({
+      currentCallId: callId,
+      callStatus: this.mapDatabaseCallStatus(status)
+    });
+  }
+
+  private mapDatabaseCallStatus(status: string): DiagnosticsInfo['callStatus'] {
+    switch (status) {
+      case 'ringing': return 'Ringing';
+      case 'accepted': return 'Accepted';
+      case 'rejected': return 'Rejected';
+      case 'missed': return 'Missed';
+      case 'ended': return 'Ended';
+      case 'failed': return 'Failed';
+      default: return 'Idle';
+    }
   }
 
   // --- USER STATUSES (24-Hour Disappearing Stories) ---

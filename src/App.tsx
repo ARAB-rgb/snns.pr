@@ -231,14 +231,9 @@ function AppContent() {
     if (!currentUser) return;
 
     // 1. Create call row in Supabase
-    const callId = await supabaseService.createCallRecord({
-      caller_id: currentUser.id,
-      receiver_id: participant.id,
-      type,
-      status: 'ringing'
-    });
+    
 
-    const activeCallId = callId || `call_${Date.now()}`;
+    const activeCallId = `call_${Date.now()}`;
 
     // 2. Show outgoing ringing overlay using the real database UUID
     setOutgoingCall({
