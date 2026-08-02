@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Mic, MicOff, Video, VideoOff, PhoneOff, Monitor, Hand, Signal, Volume2, ShieldCheck } from 'lucide-react';
 import { ActiveCallState, User } from '../types';
 import { useLanguage } from '../i18n/LanguageContext';
-import { zegoService } from '../services/zegocloud';
+import { zegoCallService } from '../services/zegoCallService';
 import { sounds } from '../services/audioSynthesizer';
 
 interface CallScreenProps {
@@ -33,21 +33,30 @@ export const CallScreen: React.FC<CallScreenProps> = ({ callState, onEndCall }) 
 
   // Initialize camera and video stream
   useEffect(() => {
-    let streamRef: MediaStream | null = null;
+    let activeStream: MediaStream | null = null;
 
     async function setupCamera() {
       if (callState.type === 'video' && !isVideoOff) {
-        streamRef = await zegoService.getLocalUserMedia(true, true);
-        if (streamRef && localVideoRef.current) {
-          localVideoRef.current.srcObject = streamRef;
+        try {
+          if (navigator.mediaDevices?.getUserMedia) {
+            activeStream = await navigator.mediaDevices.getUserMedia({
+              video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' },
+              audio: true
+            });
+            if (activeStream && localVideoRef.current) {
+              localVideoRef.current.srcObject = activeStream;
+            }
+          }
+        } catch (err) {
+          console.warn('Camera permission denied or unavailable:', err);
         }
       }
     }
     setupCamera();
 
     return () => {
-      if (streamRef) {
-        streamRef.getTracks().forEach((track) => track.stop());
+      if (activeStream) {
+        activeStream.getTracks().forEach((track) => track.stop());
       }
     };
   }, [callState.type, isVideoOff]);
@@ -57,21 +66,40 @@ export const CallScreen: React.FC<CallScreenProps> = ({ callState, onEndCall }) 
   };
 
   const toggleVideo = async () => {
-    setIsVideoOff(!isVideoOff);
-    if (isVideoOff && localVideoRef.current) {
-      const stream = await zegoService.getLocalUserMedia(true, true);
-      if (stream) {
-        localVideoRef.current.srcObject = stream;
+    const nextVideoOff = !isVideoOff;
+    setIsVideoOff(nextVideoOff);
+    if (!nextVideoOff && localVideoRef.current) {
+      try {
+        if (navigator.mediaDevices?.getUserMedia) {
+          const stream = await navigator.mediaDevices.getUserMedia({
+            video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' },
+            audio: true
+          });
+          if (stream) {
+            localVideoRef.current.srcObject = stream;
+          }
+        }
+      } catch (err) {
+        console.warn('Camera stream error:', err);
       }
     }
   };
 
   const toggleScreenShare = async () => {
     if (!isScreenSharing) {
-      const stream = await zegoService.getScreenShareStream();
-      if (stream && screenVideoRef.current) {
-        screenVideoRef.current.srcObject = stream;
-        setIsScreenSharing(true);
+      try {
+        if (navigator.mediaDevices?.getDisplayMedia) {
+          const stream = await navigator.mediaDevices.getDisplayMedia({
+            video: true,
+            audio: true
+          });
+          if (stream && screenVideoRef.current) {
+            screenVideoRef.current.srcObject = stream;
+            setIsScreenSharing(true);
+          }
+        }
+      } catch (err) {
+        console.warn('Screen share canceled:', err);
       }
     } else {
       setIsScreenSharing(false);
@@ -80,7 +108,6 @@ export const CallScreen: React.FC<CallScreenProps> = ({ callState, onEndCall }) 
 
   const handleEnd = () => {
     sounds.playHangupTone();
-    zegoService.stopLocalStream();
     onEndCall();
   };
 

@@ -45,7 +45,6 @@ export interface Translations {
   supabaseAuth: string;
   zegoConfig: string;
   appId: string;
-  serverSecret: string;
   saveSettings: string;
   flutterPreview: string;
   phoneFrame: string;
@@ -129,9 +128,8 @@ export const TRANSLATIONS: Record<LanguageCode, Translations> = {
     supabaseAuth: 'Supabase Auth',
     zegoConfig: 'ZegoCloud Configuration',
     appId: 'Zego App ID',
-    serverSecret: 'Server Secret',
     saveSettings: 'Save Settings',
-    flutterPreview: 'Flutter Layout',
+    flutterPreview: 'Web Layout',
     phoneFrame: 'Phone View',
     fullScreen: 'Full Screen',
     demoUser: 'Active Profile',
@@ -151,8 +149,8 @@ export const TRANSLATIONS: Record<LanguageCode, Translations> = {
     newCall: 'New Call',
     noMessagesYet: 'No messages yet. Start a conversation!',
     noCallsYet: 'No call history recorded yet.',
-    aboutFlutterApp: 'Flutter Engine & i18n',
-    aboutDescription: 'Built with Flutter-inspired Material 3 UI, ZegoCloud real-time audio/video engine, and multi-language auto-detection with native RTL support.',
+    aboutFlutterApp: 'SNNS Web Engine & i18n',
+    aboutDescription: 'Built with React + Vite UI, ZegoCloud real-time Web SDK audio/video engine, and multi-language auto-detection with native RTL support.',
     copiedToClipboard: 'Copied to clipboard!',
     zegoLiveRoomActive: 'ZegoLive Room Connected',
     status: 'Status',
@@ -211,7 +209,6 @@ export const TRANSLATIONS: Record<LanguageCode, Translations> = {
     supabaseAuth: 'مصادقة سوبابيس (Supabase)',
     zegoConfig: 'تكوين زيجو كلاود',
     appId: 'معرف تطبيق زيجو',
-    serverSecret: 'الرمز السري للسيرفر',
     saveSettings: 'حفظ الإعدادات',
     flutterPreview: 'تخطيط فلاتر',
     phoneFrame: 'عرض الهاتف',
@@ -293,7 +290,6 @@ export const TRANSLATIONS: Record<LanguageCode, Translations> = {
     supabaseAuth: 'سوبابیس توثیق',
     zegoConfig: 'زیگو کلاؤڈ ترتیب',
     appId: 'زیگو ایپ آئی ڈی',
-    serverSecret: 'سرور کا خفیہ کوڈ',
     saveSettings: 'سیٹنگز محفوظ کریں',
     flutterPreview: 'فلٹر لے آؤٹ',
     phoneFrame: 'فون ویو',
@@ -375,7 +371,6 @@ export const TRANSLATIONS: Record<LanguageCode, Translations> = {
     supabaseAuth: 'Supabase ማረጋገጫ',
     zegoConfig: 'ZegoCloud ማስተካከያ',
     appId: 'Zego መተግበሪያ ID',
-    serverSecret: 'የአገልጋይ ሚስጥር',
     saveSettings: 'ቅንብሮችን አስቀምጥ',
     flutterPreview: 'የFlutter አቀማመጥ',
     phoneFrame: 'የስልክ እይታ',
@@ -457,7 +452,6 @@ export const TRANSLATIONS: Record<LanguageCode, Translations> = {
     supabaseAuth: 'সুপাবেস অথেন্টিকেশন',
     zegoConfig: 'জেগোক্লাউড কনফিগারেশন',
     appId: 'জেগো অ্যাপ আইডি',
-    serverSecret: 'সার্ভার সিক্রেট',
     saveSettings: 'সেটিংস সেভ করুন',
     flutterPreview: 'ফ্লাটার লেআউট',
     phoneFrame: 'ফোন ভিউ',
@@ -539,7 +533,6 @@ export const TRANSLATIONS: Record<LanguageCode, Translations> = {
     supabaseAuth: 'Supabase 身份验证',
     zegoConfig: 'ZegoCloud 实时音视频配置',
     appId: 'Zego App ID',
-    serverSecret: '服务器密钥',
     saveSettings: '保存设置',
     flutterPreview: 'Flutter 布局',
     phoneFrame: '手机视图',

@@ -21,7 +21,7 @@ interface ChatDetailProps {
     mediaUrl?: string,
     fileName?: string,
     replyTo?: { id: string; text: string; senderName?: string }
-  ) => void;
+  ) => Promise<boolean> | void;
   onDeleteMessage?: (messageId: string) => void;
   onStartCall: (participant: User, type: 'audio' | 'video') => void;
 }
@@ -71,16 +71,16 @@ export const ChatDetail: React.FC<ChatDetailProps> = ({
 
       recorder.onstop = async () => {
         const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-        const reader = new FileReader();
-        reader.onloadend = async () => {
-          const base64Audio = reader.result as string;
-          const uploadedUrl = await supabaseService.uploadAttachment(audioBlob, `voice_${Date.now()}.webm`, 'audio/webm');
-          const finalUrl = uploadedUrl || base64Audio;
-          onSendMessage('تسجيل صوتي', 'audio', finalUrl, 'voice_note.webm', replyingTo || undefined);
-          setReplyingTo(null);
-          sounds.playMessageSentSound();
-        };
-        reader.readAsDataURL(audioBlob);
+        const uploadRes = await supabaseService.uploadAttachment(audioBlob, `voice_${Date.now()}.webm`, 'audio/webm');
+        if (uploadRes) {
+          const success = await onSendMessage('تسجيل صوتي', 'audio', uploadRes.url, 'voice_note.webm', replyingTo || undefined);
+          if (success !== false) {
+            setReplyingTo(null);
+            sounds.playMessageSentSound();
+          }
+        } else {
+          console.error('Failed to upload voice recording to Supabase Storage');
+        }
         stream.getTracks().forEach((track) => track.stop());
       };
 
@@ -110,13 +110,18 @@ export const ChatDetail: React.FC<ChatDetailProps> = ({
     }
   };
 
-  const handleSend = () => {
+  const handleSend = async () => {
     if (!inputText.trim()) return;
-    onSendMessage(inputText.trim(), 'text', undefined, undefined, replyingTo || undefined);
-    setInputText('');
-    setReplyingTo(null);
-    setShowEmojiPicker(false);
-    sounds.playMessageSentSound();
+    const textToSend = inputText.trim();
+    const success = await onSendMessage(textToSend, 'text', undefined, undefined, replyingTo || undefined);
+    if (success !== false) {
+      setInputText('');
+      setReplyingTo(null);
+      setShowEmojiPicker(false);
+      sounds.playMessageSentSound();
+    } else {
+      console.error('Failed to send text message to Supabase. Message retained in input box.');
+    }
   };
 
   const toggleTranslation = (msgId: string) => {
@@ -126,39 +131,35 @@ export const ChatDetail: React.FC<ChatDetailProps> = ({
     }));
   };
 
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      const reader = new FileReader();
-      reader.onload = async (event) => {
-        if (event.target?.result) {
-          const base64Data = event.target.result as string;
-          const uploadedUrl = await supabaseService.uploadAttachment(file, file.name, file.type);
-          const finalUrl = uploadedUrl || base64Data;
-          onSendMessage('صورة', 'image', finalUrl, file.name, replyingTo || undefined);
+      const uploadRes = await supabaseService.uploadAttachment(file, file.name, file.type);
+      if (uploadRes) {
+        const success = await onSendMessage('صورة', 'image', uploadRes.url, file.name, replyingTo || undefined);
+        if (success !== false) {
           setReplyingTo(null);
           sounds.playMessageSentSound();
         }
-      };
-      reader.readAsDataURL(file);
+      } else {
+        console.error('Supabase image upload failed. Image message not sent.');
+      }
     }
   };
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      const reader = new FileReader();
-      reader.onload = async (event) => {
-        if (event.target?.result) {
-          const base64Data = event.target.result as string;
-          const uploadedUrl = await supabaseService.uploadAttachment(file, file.name, file.type);
-          const finalUrl = uploadedUrl || base64Data;
-          onSendMessage(`ملف: ${file.name}`, 'file', finalUrl, file.name, replyingTo || undefined);
+      const uploadRes = await supabaseService.uploadAttachment(file, file.name, file.type);
+      if (uploadRes) {
+        const success = await onSendMessage(`ملف: ${file.name}`, 'file', uploadRes.url, file.name, replyingTo || undefined);
+        if (success !== false) {
           setReplyingTo(null);
           sounds.playMessageSentSound();
         }
-      };
-      reader.readAsDataURL(file);
+      } else {
+        console.error('Supabase file upload failed. File message not sent.');
+      }
     }
   };
 

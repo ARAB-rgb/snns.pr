@@ -19,7 +19,6 @@ import { User, Message, CallLog, ActiveCallState } from './types';
 import { supabaseAuth } from './services/supabaseAuth';
 import { supabaseService } from './services/supabaseService';
 import { zegoCallService } from './services/zegoCallService';
-import { zegoService } from './services/zegocloud';
 import { sounds } from './services/audioSynthesizer';
 import { OutgoingCallOverlay } from './components/OutgoingCallOverlay';
 
@@ -86,9 +85,9 @@ function AppContent() {
       onCallAccepted: () => {
         const currentOutgoing = outgoingCallRef.current;
         if (currentOutgoing) {
-          const roomId = `room_${currentUser.id}_${currentOutgoing.callee.id}`;
+          const roomId = currentOutgoing.callId;
           setActiveCall({
-            id: `call_${Date.now()}`,
+            id: currentOutgoing.callId,
             roomId,
             participant: currentOutgoing.callee,
             type: currentOutgoing.type,
@@ -191,7 +190,7 @@ function AppContent() {
 
     const unsub = supabaseService.subscribeCallStatus(outgoingCall.callId, (status) => {
       if (status === 'accepted') {
-        const roomId = `room_${currentUser.id}_${outgoingCall.callee.id}`;
+        const roomId = outgoingCall.callId;
         setActiveCall({
           id: outgoingCall.callId,
           roomId,
@@ -259,7 +258,7 @@ function AppContent() {
     if (!incomingCall || !currentUser) return;
 
     await supabaseService.updateCallStatus(incomingCall.callId, 'accepted');
-    const roomId = `room_${incomingCall.caller.id}_${currentUser.id}`;
+    const roomId = incomingCall.callId;
 
     setActiveCall({
       id: incomingCall.callId,
@@ -311,9 +310,9 @@ function AppContent() {
     mediaUrl?: string,
     fileName?: string,
     replyTo?: { id: string; text: string; senderName?: string }
-  ) => {
-    if (!selectedUser || !currentUser) return;
-    await supabaseService.sendMessage(
+  ): Promise<boolean> => {
+    if (!selectedUser || !currentUser) return false;
+    return await supabaseService.sendMessage(
       currentUser.id,
       selectedUser.id,
       text,

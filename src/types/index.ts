@@ -75,7 +75,6 @@ export interface ActiveCallState {
 
 export interface ZegoConfig {
   appId: string;
-  serverSecret: string;
   userName: string;
   isConfigured: boolean;
   useLiveSdkSimulation: boolean;

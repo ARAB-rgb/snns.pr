@@ -19,7 +19,7 @@ export const FlutterPhoneFrame: React.FC<FlutterPhoneFrameProps> = ({ children }
         <div className="flex items-center gap-2.5">
           <div className="flex items-center gap-1.5 bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 px-2.5 py-1 rounded-full font-medium">
             <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
-            <span>Flutter Engine M3</span>
+            <span>SNNS Web Engine</span>
           </div>
           <span className="text-slate-500 hidden sm:inline">•</span>
           <span className="text-slate-400 hidden sm:inline">

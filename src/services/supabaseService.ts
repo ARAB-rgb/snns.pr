@@ -13,7 +13,7 @@ export interface DiagnosticsInfo {
   // Calls Diagnostics
   callsRealtimeStatus: 'SUBSCRIBED' | 'Connecting' | 'Failed';
   edgeFunctionTokenStatus: 'Success' | 'Failed' | 'Not Tested';
-  zegoSdkStatus: 'Ready' | 'Failed' | 'Initializing';
+  zegoSdkStatus: 'Ready' | 'Failed' | 'Initializing' | 'Idle';
   cameraPermission: 'Granted' | 'Denied' | 'Not Requested';
   microphonePermission: 'Granted' | 'Denied' | 'Not Requested';
   currentCallId?: string;
@@ -426,45 +426,103 @@ export class SupabaseService {
     return [userId1, userId2].sort().join('_');
   }
 
-  // Upload file or blob to Supabase Storage with base64 fallback
-  async uploadAttachment(fileOrBlob: File | Blob, fileName: string, contentType?: string): Promise<string | null> {
-    if (!isSupabaseConfigured) return null;
+  // Upload file or blob to Supabase Storage ('chat-media' bucket) and return Signed URL or storage path
+  async uploadAttachment(fileOrBlob: File | Blob, fileName: string, contentType?: string): Promise<{ storagePath: string; url: string } | null> {
+    if (!isSupabaseConfigured) {
+      console.warn('Supabase client not configured for file upload');
+      return null;
+    }
+
     try {
       const cleanFileName = `${Date.now()}_${fileName.replace(/[^a-zA-Z0-9_.-]/g, '_')}`;
-      const filePath = `chat_media/${cleanFileName}`;
+      const filePath = `uploads/${cleanFileName}`;
+      const mimeType = contentType || fileOrBlob.type || 'application/octet-stream';
 
-      const { data, error } = await supabase.storage
-        .from('attachments')
+      // 1. Try 'chat-media' bucket
+      let targetBucket = 'chat-media';
+      let { data, error } = await supabase.storage
+        .from(targetBucket)
         .upload(filePath, fileOrBlob, {
-          contentType: contentType || fileOrBlob.type || 'application/octet-stream',
+          contentType: mimeType,
           upsert: true
         });
 
-      if (!error && data) {
-        const { data: publicData } = supabase.storage.from('attachments').getPublicUrl(filePath);
-        if (publicData?.publicUrl) {
-          return publicData.publicUrl;
-        }
-      } else {
-        // Try 'media' bucket if 'attachments' bucket doesn't exist
-        const { data: data2, error: error2 } = await supabase.storage
-          .from('media')
+      // 2. If 'chat-media' bucket fails, try 'attachments' or 'media'
+      if (error) {
+        console.warn('Upload to chat-media bucket error:', error.message);
+        targetBucket = 'attachments';
+        const res2 = await supabase.storage
+          .from(targetBucket)
           .upload(filePath, fileOrBlob, {
-            contentType: contentType || fileOrBlob.type || 'application/octet-stream',
+            contentType: mimeType,
             upsert: true
           });
+        data = res2.data;
+        error = res2.error;
 
-        if (!error2 && data2) {
-          const { data: publicData2 } = supabase.storage.from('media').getPublicUrl(filePath);
-          if (publicData2?.publicUrl) {
-            return publicData2.publicUrl;
-          }
+        if (error) {
+          targetBucket = 'media';
+          const res3 = await supabase.storage
+            .from(targetBucket)
+            .upload(filePath, fileOrBlob, {
+              contentType: mimeType,
+              upsert: true
+            });
+          data = res3.data;
+          error = res3.error;
         }
       }
-    } catch (err) {
-      console.info('uploadAttachment notice:', err);
+
+      if (error || !data) {
+        console.error('Supabase Storage upload failed:', error?.message || 'Unknown error');
+        return null;
+      }
+
+      // Generate Signed URL for private bucket access (24 hour validity)
+      const { data: signedData, error: signedError } = await supabase.storage
+        .from(targetBucket)
+        .createSignedUrl(filePath, 86400);
+
+      if (signedError || !signedData?.signedUrl) {
+        // Fallback to public URL if bucket is public
+        const { data: publicData } = supabase.storage.from(targetBucket).getPublicUrl(filePath);
+        if (publicData?.publicUrl) {
+          return { storagePath: `${targetBucket}:${filePath}`, url: publicData.publicUrl };
+        }
+        return null;
+      }
+
+      return { storagePath: `${targetBucket}:${filePath}`, url: signedData.signedUrl };
+    } catch (err: any) {
+      console.error('Exception during Supabase Storage upload:', err?.message || err);
+      return null;
     }
-    return null;
+  }
+
+  // Get refreshed Signed URL for storage path or media URL
+  async getSignedUrl(storagePathOrUrl: string): Promise<string> {
+    if (!storagePathOrUrl) return '';
+    if (storagePathOrUrl.startsWith('http://') || storagePathOrUrl.startsWith('https://')) {
+      return storagePathOrUrl;
+    }
+
+    try {
+      let bucket = 'chat-media';
+      let path = storagePathOrUrl;
+
+      if (storagePathOrUrl.includes(':')) {
+        const parts = storagePathOrUrl.split(':');
+        bucket = parts[0];
+        path = parts[1];
+      }
+
+      const { data, error } = await supabase.storage.from(bucket).createSignedUrl(path, 86400);
+      if (data?.signedUrl) return data.signedUrl;
+    } catch (e) {
+      // fallback
+    }
+
+    return storagePathOrUrl;
   }
 
   // Ensure conversation and member rows exist
@@ -1067,16 +1125,24 @@ export class SupabaseService {
 
   // Update Call Status
   async updateCallStatus(callId: string, status: 'ringing' | 'accepted' | 'rejected' | 'missed' | 'ended' | 'failed', durationSec?: number): Promise<void> {
-    if (!isSupabaseConfigured) return;
+    if (!isSupabaseConfigured || !callId) return;
 
     try {
-      await supabase.from('calls').update({
-        status,
-        answered_at: status === 'accepted' ? new Date().toISOString() : undefined,
-        ended_at: status === 'ended' || status === 'rejected' || status === 'missed' || status === 'failed' ? new Date().toISOString() : undefined,
-        duration_seconds: durationSec || 0,
-        duration: durationSec || 0
-      }).eq('id', callId);
+      const updatePayload: Record<string, any> = { status };
+
+      if (status === 'accepted') {
+        updatePayload.answered_at = new Date().toISOString();
+      }
+
+      if (status === 'ended' || status === 'rejected' || status === 'missed' || status === 'failed') {
+        updatePayload.ended_at = new Date().toISOString();
+        if (typeof durationSec === 'number') {
+          updatePayload.duration_seconds = durationSec;
+          updatePayload.duration = durationSec;
+        }
+      }
+
+      await supabase.from('calls').update(updatePayload).eq('id', callId);
 
       diagnosticsManager.update({
         currentCallId: callId,
