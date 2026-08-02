@@ -525,38 +525,40 @@ export class SupabaseService {
 
   // Ensure conversation and member rows exist with genuine UUID
   async ensureConversation(
-  currentUserId: string,
-  otherUserId: string,
-): Promise<string> {
-  if (!currentUserId || !otherUserId) {
-    throw new Error('معرف المستخدم غير موجود');
-  }
+    currentUserId: string,
+    otherUserId: string
+  ): Promise<string> {
+    if (!currentUserId || !otherUserId) {
+      return '';
+    }
 
-  const { data, error } = await supabase.rpc(
-    'create_direct_conversation',
-    {
-      other_user_id: otherUserId,
-    },
-  );
+    if (!isSupabaseConfigured) {
+      return crypto.randomUUID();
+    }
 
-  if (error) {
-    console.error('CREATE_CONVERSATION_RPC_ERROR', error);
-    throw new Error(error.message);
-  }
-
-  if (!data) {
-    throw new Error('لم يتم إنشاء المحادثة');
-  }
-
-  return data as string;
-}
-
+    // Try RPC 'create_direct_conversation' first
     try {
-      // 1. Check if a conversation already exists between user1Id and user2Id
+      const { data, error } = await supabase.rpc('create_direct_conversation', {
+        other_user_id: otherUserId,
+      });
+
+      if (!error && data) {
+        return data as string;
+      }
+      if (error) {
+        console.warn('CREATE_CONVERSATION_RPC_WARN', error.message);
+      }
+    } catch (rpcErr) {
+      console.warn('RPC exception, falling back to direct table queries:', rpcErr);
+    }
+
+    // Fallback: direct table queries
+    try {
+      // 1. Check if a conversation already exists between currentUserId and otherUserId
       const { data: user1Members } = await supabase
         .from('conversation_members')
         .select('conversation_id')
-        .eq('user_id', user1Id);
+        .eq('user_id', currentUserId);
 
       if (user1Members && user1Members.length > 0) {
         const convIds = user1Members.map((m: any) => m.conversation_id).filter(Boolean);
@@ -564,7 +566,7 @@ export class SupabaseService {
           const { data: sharedMembers } = await supabase
             .from('conversation_members')
             .select('conversation_id')
-            .eq('user_id', user2Id)
+            .eq('user_id', otherUserId)
             .in('conversation_id', convIds)
             .limit(1);
 
@@ -582,7 +584,7 @@ export class SupabaseService {
         .insert({
           id: newConvId,
           last_message: '',
-          last_sender_id: user1Id,
+          last_sender_id: currentUserId,
           last_message_time: new Date().toISOString()
         })
         .select('id')
@@ -598,8 +600,8 @@ export class SupabaseService {
       const { error: membersError } = await supabase
         .from('conversation_members')
         .upsert([
-          { conversation_id: finalConvId, user_id: user1Id },
-          { conversation_id: finalConvId, user_id: user2Id }
+          { conversation_id: finalConvId, user_id: currentUserId },
+          { conversation_id: finalConvId, user_id: otherUserId }
         ], { onConflict: 'conversation_id,user_id' });
 
       if (membersError) {
