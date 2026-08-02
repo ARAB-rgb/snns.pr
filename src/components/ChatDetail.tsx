@@ -188,7 +188,7 @@ export const ChatDetail: React.FC<ChatDetailProps> = ({
       data: { session }
     } = await supabase.auth.getSession();
 
-    const conversationId = supabaseService.getConversationId(currentUserId, participant.id);
+    const conversationId = await supabaseService.ensureConversation(currentUserId, participant.id);
 
     console.log({
       messageText: trimmedMessage,
@@ -209,9 +209,7 @@ export const ChatDetail: React.FC<ChatDetailProps> = ({
 
     setIsSending(true);
     try {
-      // Ensure conversation exists between currentUserId and target user
-      const convId = await supabaseService.ensureConversation(currentUserId, participant.id);
-      if (!convId) {
+      if (!conversationId) {
         const convErr = 'فشل إنشاء أو تحديد رقم المحادثة';
         console.error(convErr);
         setSendError(convErr);

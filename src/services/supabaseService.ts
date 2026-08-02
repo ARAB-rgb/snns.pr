@@ -421,9 +421,9 @@ export class SupabaseService {
     };
   }
 
-  // Deterministic Conversation ID generator
-  getConversationId(userId1: string, userId2: string): string {
-    return [userId1, userId2].sort().join('_');
+  // Get or ensure conversation UUID for two users
+  async getConversationId(userId1: string, userId2: string): Promise<string> {
+    return await this.ensureConversation(userId1, userId2);
   }
 
   // Upload file or blob to Supabase Storage ('chat-media' bucket) and return Signed URL or storage path
@@ -525,27 +525,76 @@ export class SupabaseService {
     return storagePathOrUrl;
   }
 
-  // Ensure conversation and member rows exist
+  // Ensure conversation and member rows exist with genuine UUID
   async ensureConversation(user1Id: string, user2Id: string): Promise<string> {
-    const convId = this.getConversationId(user1Id, user2Id);
-    if (!isSupabaseConfigured) return convId;
+    if (!user1Id || !user2Id) {
+      return '';
+    }
+
+    if (!isSupabaseConfigured) {
+      return crypto.randomUUID();
+    }
 
     try {
-      await supabase.from('conversations').upsert({
-        id: convId,
-        last_message: '',
-        last_sender_id: user1Id,
-        last_message_time: new Date().toISOString()
-      }, { onConflict: 'id' });
+      // 1. Check if a conversation already exists between user1Id and user2Id
+      const { data: user1Members } = await supabase
+        .from('conversation_members')
+        .select('conversation_id')
+        .eq('user_id', user1Id);
 
-      await supabase.from('conversation_members').upsert([
-        { conversation_id: convId, user_id: user1Id },
-        { conversation_id: convId, user_id: user2Id }
-      ], { onConflict: 'conversation_id,user_id' });
-    } catch (err) {
-      console.error('Error ensuring conversation in Supabase:', err);
+      if (user1Members && user1Members.length > 0) {
+        const convIds = user1Members.map((m: any) => m.conversation_id).filter(Boolean);
+        if (convIds.length > 0) {
+          const { data: sharedMembers } = await supabase
+            .from('conversation_members')
+            .select('conversation_id')
+            .eq('user_id', user2Id)
+            .in('conversation_id', convIds)
+            .limit(1);
+
+          if (sharedMembers && sharedMembers.length > 0 && sharedMembers[0].conversation_id) {
+            return sharedMembers[0].conversation_id;
+          }
+        }
+      }
+
+      // 2. If no existing conversation was found, create a new conversation with a UUID
+      const newConvId = crypto.randomUUID();
+
+      const { data: newConv, error: createError } = await supabase
+        .from('conversations')
+        .insert({
+          id: newConvId,
+          last_message: '',
+          last_sender_id: user1Id,
+          last_message_time: new Date().toISOString()
+        })
+        .select('id')
+        .single();
+
+      const finalConvId = newConv?.id || newConvId;
+
+      if (createError) {
+        console.error('Error creating conversation row in Supabase:', createError.message || createError);
+      }
+
+      // 3. Insert membership rows for both users
+      const { error: membersError } = await supabase
+        .from('conversation_members')
+        .upsert([
+          { conversation_id: finalConvId, user_id: user1Id },
+          { conversation_id: finalConvId, user_id: user2Id }
+        ], { onConflict: 'conversation_id,user_id' });
+
+      if (membersError) {
+        console.error('Error inserting conversation_members in Supabase:', membersError.message || membersError);
+      }
+
+      return finalConvId;
+    } catch (err: any) {
+      console.error('Exception in ensureConversation:', err?.message || err);
+      return crypto.randomUUID();
     }
-    return convId;
   }
 
   // Subscribe to real conversations for current user
@@ -596,12 +645,7 @@ export class SupabaseService {
       if (convs) {
         const convList = convs.map((c: any) => {
           const members: string[] = (c.conversation_members || []).map((m: any) => m.user_id);
-          let otherUserId = members.find((m) => m !== currentUserId);
-
-          if (!otherUserId && c.id && c.id.includes('_')) {
-            const parts = c.id.split('_');
-            otherUserId = parts.find((p: string) => p !== currentUserId) || currentUserId;
-          }
+          const otherUserId = members.find((m) => m !== currentUserId) || currentUserId;
 
           const time = c.last_message_time
             ? new Date(c.last_message_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
@@ -751,22 +795,22 @@ export class SupabaseService {
     fileName?: string,
     replyTo?: { id: string; text: string; senderName?: string }
   ): Promise<boolean> {
+    const convId = await this.ensureConversation(senderId, receiverId);
+
     if (!isSupabaseConfigured) {
       console.warn('Supabase client is not configured.');
       console.log('Message insert failed');
-      console.log('conversation_id:', this.getConversationId(senderId, receiverId));
+      console.log('conversation_id:', convId);
       console.log('sender_id:', senderId);
       console.log('receiver_id:', receiverId);
       diagnosticsManager.update({
         lastInsertStatus: 'Failed',
-        lastConversationId: this.getConversationId(senderId, receiverId),
+        lastConversationId: convId,
         lastSenderId: senderId,
         lastReceiverId: receiverId
       });
       return false;
     }
-
-    const convId = await this.ensureConversation(senderId, receiverId);
 
     const lastMsgText = type === 'image' ? '📷 صورة' : type === 'audio' ? '🎤 تسجيل صوتي' : type === 'file' ? '📁 ملف' : text;
 

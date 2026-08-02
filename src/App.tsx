@@ -174,14 +174,23 @@ function AppContent() {
   // Subscribe to Messages when a chat is open
   useEffect(() => {
     if (!currentUser || !selectedUser) return;
-    const convId = supabaseService.getConversationId(currentUser.id, selectedUser.id);
-    const unsub = supabaseService.subscribeMessages(convId, (msgList) => {
-      setMessages((prev) => ({
-        ...prev,
-        [selectedUser.id]: msgList
-      }));
+    let unsub: (() => void) | null = null;
+    let cancelled = false;
+
+    supabaseService.ensureConversation(currentUser.id, selectedUser.id).then((convId) => {
+      if (cancelled || !convId) return;
+      unsub = supabaseService.subscribeMessages(convId, (msgList) => {
+        setMessages((prev) => ({
+          ...prev,
+          [selectedUser.id]: msgList
+        }));
+      });
     });
-    return () => unsub();
+
+    return () => {
+      cancelled = true;
+      if (unsub) unsub();
+    };
   }, [currentUser?.id, selectedUser?.id]);
 
   // Listen for outgoing call acceptance or rejection
@@ -326,7 +335,7 @@ function AppContent() {
   // Delete message
   const handleDeleteMessage = async (messageId: string) => {
     if (!selectedUser || !currentUser) return;
-    const convId = supabaseService.getConversationId(currentUser.id, selectedUser.id);
+    const convId = await supabaseService.ensureConversation(currentUser.id, selectedUser.id);
     await supabaseService.deleteMessage(convId, messageId);
   };
 
