@@ -47,8 +47,7 @@ jobs:
 
       - name: 6. Deploy to Hostinger via FTP (if secrets configured)
         uses: SamKirkland/FTP-Deploy-Action@v4.3.5
-        if: ${{ secrets.FTP_SERVER != '' }}
-        with:
+               with:
           server: ${{ secrets.FTP_SERVER }}
           username: ${{ secrets.FTP_USERNAME }}
           password: ${{ secrets.FTP_PASSWORD }}
